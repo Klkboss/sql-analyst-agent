@@ -1,0 +1,17 @@
+# Local AI-assistant files (kept out of the repo on purpose)
+CLAUDE.md
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Secrets
+.env
+
+# Downloaded databases (re-create with: python data/download_chinook.py)
+data/*.sqlite
+data/*.db
