@@ -15,3 +15,4 @@ venv/
 # Downloaded databases (re-create with: python data/download_chinook.py)
 data/*.sqlite
 data/*.db
+data/*.part
