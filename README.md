@@ -10,6 +10,17 @@ Plain Python, no agent framework.
 <!-- Demo GIF: save the recording as docs/demo.gif and replace the next line with ![Demo](docs/demo.gif) -->
 _Demo GIF coming soon._
 
+**Highlights**
+
+- **The smaller model wins:** qwen3:4b beats qwen2.5-coder:7b on BIRD and runs 1.7× faster,
+  because it fits entirely on a 6 GB laptop GPU.
+- **Self-correction adds +4 points and never broke a correct answer.** Hints add +16, which
+  is why the app has a Data notes box.
+- **Local matches cloud:** on 50 questions, the local 4B matches openai/gpt-oss-120b on Groq
+  (within noise).
+
+**Tech stack:** Python, SQLite, Ollama, Groq, Streamlit, Plotly, Docker, pytest (126 tests).
+
 **BIRD dev benchmark, 200 questions, shipped defaults, qwen3:4b:**
 
 | | Execution accuracy | Adjusted to BIRD's difficulty mix |
@@ -128,7 +139,7 @@ count), which BIRD's exact-column rule scores as wrong. Its time per question is
 waiting on the free tier's 8,000 tokens/minute limit. Reasoning effort `low` vs Groq's
 default gave the same accuracy and token use in a 5-question pilot, and was much faster.
 
-### Phase 1: Chinook, 10 questions
+### Sanity check: Chinook
 
 10/10 for both models, 0 retries (counts, filters, 1–3 joins, top-N by revenue). Chinook
 is easy for these models; BIRD is the real test. Run it with `python eval_chinook.py`.
@@ -180,9 +191,9 @@ to reproduce the headline (about 15 min per run on an RTX 4050 laptop).
 
 ### Local, with Ollama
 
-```bash
+```powershell
 py -3.11 -m venv .venv
-.venv\Scripts\activate              # Windows (source .venv/bin/activate elsewhere)
+.venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env               # then edit if needed
 python data/download_chinook.py
@@ -194,15 +205,31 @@ python cli.py "Which 5 customers spent the most in total?"
 pytest                               # unit tests, no LLM needed
 ```
 
+On Linux / macOS, the first four lines differ; the rest is the same:
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
 Benchmark: `python data/download_bird.py` (346 MB download, ~1.5 GB on disk), then
 `python -m eval.bird` (resumable; `--limit 10` for a pilot; `--provider groq --models
 openai/gpt-oss-120b --first 50` for the Groq check) and `python -m eval.report`.
 
 ### Docker, with Groq
 
-```bash
+```powershell
 copy .env.example .env               # set GROQ_API_KEY (free at console.groq.com)
 docker compose up --build            # http://localhost:8501
+```
+
+On Linux / macOS:
+
+```bash
+cp .env.example .env                 # set GROQ_API_KEY
+docker compose up --build
 ```
 
 - The key is read from `.env` when the container starts; `.env` is never copied into the image.
