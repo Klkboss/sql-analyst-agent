@@ -33,6 +33,8 @@ log = logging.getLogger(__name__)
 RESERVED_TOKENS = 1024
 # Earlier (question, SQL) turns sent with a follow-up question.
 MAX_HISTORY_TURNS = 3
+CONTEXT_ERROR = ("The schema is too large for the model's context window, even after picking "
+                 "tables and dropping sample rows. Raise OLLAMA_NUM_CTX or ask about fewer tables.")
 
 
 @dataclass
@@ -90,10 +92,13 @@ def _keyword_hint(error: str) -> str:
 
 def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult,
                 rules: tuple[str, ...] = ()) -> list[dict]:
-    """Initial messages, shrunk to fit the context window in three steps (logged, never silent):
+    """Initial messages, shrunk to fit the context window step by step (logged, never silent):
     1. drop older history turns, keeping the last one (a follow-up needs it most);
-    2. show only the tables this question needs (one extra LLM call);
+    2. show only the tables this question needs (one extra LLM call), with bridge tables if
+       they fit, without them if not, and without sample rows as the last resort;
     3. drop the last history turn too.
+    If it still doesn't fit, out.ctx_overflow is set and run_agent gives up cleanly: this
+    Ollama version rejects an over-long prompt (HTTP 400) instead of cutting it.
     """
     budget = config.CONTEXT_LIMIT - RESERVED_TOKENS
 
@@ -116,12 +121,23 @@ def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult,
         reply = llm.chat(generator.table_select_messages(get_schema(db_path, "names"), ask, evidence))
         out.select_ms = (time.perf_counter() - start) * 1000
         picked = generator.parse_tables(reply.text, list_tables(db_path))
-        # Add bridge tables, so e.g. order_reviews + products also brings order_items.
-        out.selected_tables = bridge_tables(db_path, picked) if picked else None
-        log.info("selected tables: %s", out.selected_tables or "none recognised - keeping all")
-        if out.selected_tables:
-            schema = get_schema(db_path, detail, tuple(out.selected_tables))
-            messages, est = build(schema, history)
+        log.info("selected tables: %s", picked or "none recognised - keeping all")
+        if picked:
+            # Bridge tables connect the picks (order_reviews + products also needs order_items),
+            # but a bridge can be huge (BIRD's 115-column Match), so each option is tried in
+            # order of how much it shows, and the first that fits wins.
+            bridged = bridge_tables(db_path, picked)
+            options = [(bridged, detail), (picked, detail)]
+            if detail == "full":
+                options += [(bridged, "lean"), (picked, "lean")]
+            for tables, d in options:
+                schema = get_schema(db_path, d, tuple(tables))
+                messages, est = build(schema, history)
+                out.selected_tables = tables
+                if est <= budget:
+                    break
+            if d == "lean":
+                log.warning("schema shown without sample rows to fit the context window")
 
     if est > budget and history:
         history = []
@@ -131,7 +147,7 @@ def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult,
     out.prompt_tokens_est, out.history_used = est, len(history)
     if est > budget:
         out.ctx_overflow = True
-        log.warning("prompt still ~%d tokens after selection; Ollama will truncate it", est)
+        log.warning("prompt still ~%d tokens after every reduction; not sending it", est)
     return messages
 
 
@@ -151,6 +167,9 @@ def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_
     recent = list(history or [])[-MAX_HISTORY_TURNS:]
     messages = _fit_schema(db_path, question, evidence, schema_detail, recent, out,
                            (FANOUT_RULE,) if fanout else ())
+    if out.ctx_overflow:  # a failed answer the user can act on, instead of an HTTP 400
+        out.attempts.append(Attempt("", CONTEXT_ERROR, out.select_ms, None))
+        return out
     warned_sql = None  # SQL we flagged as suspicious last round
     failed = set()     # SQL that already errored: resending it is a wasted retry at temperature 0
 

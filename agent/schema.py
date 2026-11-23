@@ -3,6 +3,7 @@
 Two levels of detail (the benchmark compares them):
   "names" - table and column names only (the baseline)
   "full"  - plus types, primary/foreign keys and 3 sample rows per table
+  "lean"  - "full" without sample rows: the last resort when a schema won't fit the context
 Sample rows show the model real value formats (e.g. dates as '2009-01-01 00:00:00',
 'USA' not 'United States'). Foreign keys tell it how to join tables.
 """
@@ -191,10 +192,11 @@ def get_schema(db_path: str | Path, detail: str = "full", tables: tuple[str, ...
                 if col in fks:
                     extra += f" REFERENCES {fks[col]}"
                 lines.append(f"  {_show(col)} {ctype or 'ANY'}{extra}")
-            # Table names can't be bound as parameters; t comes from sqlite_master and _q() escapes it.
-            cur = conn.execute(f"SELECT * FROM {_q(t)} LIMIT ?", (SAMPLE_ROWS,))  # nosemgrep
-            lines.append("  Sample rows (" + " | ".join(d[0] for d in cur.description) + "):")
-            lines += ["    " + " | ".join(_short(v) for v in row) for row in cur]
+            if detail != "lean":
+                # Table names can't be bound as parameters; t comes from sqlite_master and _q() escapes it.
+                cur = conn.execute(f"SELECT * FROM {_q(t)} LIMIT ?", (SAMPLE_ROWS,))  # nosemgrep
+                lines.append("  Sample rows (" + " | ".join(d[0] for d in cur.description) + "):")
+                lines += ["    " + " | ".join(_short(v) for v in row) for row in cur]
             parts.append("\n".join(lines))
     if detail == "names":
         return "\n".join(parts)

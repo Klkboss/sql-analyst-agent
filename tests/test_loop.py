@@ -106,10 +106,37 @@ def test_big_schema_triggers_table_selection(db, fake_llm, monkeypatch):
     assert r.ok
 
 
-def test_still_too_big_is_flagged_not_hidden(db, fake_llm, monkeypatch):
+def test_still_too_big_fails_cleanly_without_sending(db, fake_llm, monkeypatch):
     monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 10)
-    fake_llm("artist", "SELECT name FROM artist")
-    assert loop.run_agent("q", db).ctx_overflow
+    calls = fake_llm("artist", "SELECT name FROM artist")
+    r = loop.run_agent("q", db)
+    assert r.ctx_overflow and r.attempts[0].error == loop.CONTEXT_ERROR
+    assert len(calls) == 1 and r.result is None  # only the table-selection call was made
+
+
+def _size_detail(db, question, tables, detail):
+    from agent.generator import estimate_tokens, initial_messages
+    from agent.schema import get_schema
+    return estimate_tokens(initial_messages(get_schema(db, detail, tables), question))
+
+
+def test_drops_a_bridge_table_that_does_not_fit(db, fake_llm, monkeypatch):
+    q = "artists and order items"
+    ends, bridged = ("artist", "order items"), ("album", "artist", "order items")
+    assert _size_detail(db, q, ends, "full") < _size_detail(db, q, bridged, "full")
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + _size_detail(db, q, ends, "full"))
+    fake_llm("artist, order items", "SELECT name FROM artist")
+    assert loop.run_agent(q, db).selected_tables == ["artist", "order items"]
+
+
+def test_drops_sample_rows_as_last_resort(db, fake_llm, monkeypatch):
+    q = "artist names"
+    lean, full = _size_detail(db, q, ("artist",), "lean"), _size_detail(db, q, ("artist",), "full")
+    assert lean < full
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + lean)
+    calls = fake_llm("artist", "SELECT name FROM artist")
+    r = loop.run_agent(q, db)
+    assert r.ok and "Sample rows" not in calls[1][0]["content"] and "Table artist:" in calls[1][0]["content"]
 
 
 # --- Follow-up questions (conversation history) -----------------------------------

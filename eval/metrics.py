@@ -34,6 +34,7 @@ _ERROR_REASONS = [
     ("incomplete input", "syntax"),
     ("ambiguous column", "ambiguous_column"),
     ("longer than", "timeout"),
+    ("too large for the model's context", "context_overflow"),
     ("Only SELECT", "guard"), ("Forbidden keyword", "guard"), ("single statement", "guard"),
 ]
 
