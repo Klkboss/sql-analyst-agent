@@ -39,10 +39,13 @@ CONFIGS = {
     "c_zero":   dict(_BASE, zero_agg_suspicious=True),               # + fix 1
     "c_strict": dict(_BASE, strict_retry=True),                      # + fix 2
     "c_both":   dict(_BASE, zero_agg_suspicious=True, strict_retry=True),
+    # The shipped defaults. Same switches as c_zero, but run on the final code
+    # (keyword quoting in schema.py), so the README headline matches what ships.
+    "final":    dict(_BASE, zero_agg_suspicious=True),
 }
 # A run is a config name, plus "+ev" to append BIRD's human-written evidence hint.
 DEFAULT_RUNS = ["a_names", "b_schema", "c_retry", "c_zero", "c_strict", "c_both",
-                "a_names+ev", "b_schema+ev", "c_retry+ev", "c_both+ev"]
+                "a_names+ev", "b_schema+ev", "c_retry+ev", "c_both+ev", "final", "final+ev"]
 
 FIELDS = ["question_id", "db_id", "difficulty", "ex", "ex_lenient", "reason", "retries",
           "latency_ms", "select_ms", "tokens_per_sec", "prompt_tokens_est", "selected_tables",

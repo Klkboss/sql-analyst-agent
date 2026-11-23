@@ -35,6 +35,13 @@ def test_odd_names_are_quoted(db):
     assert 'Table "order items": "item id", "unit price", album_id' in get_schema(db, "names")
 
 
+def test_keywords_are_quoted_plain_names_are_not():
+    from agent.schema import _show
+    assert _show("order") == '"order"' and _show("group") == '"group"' and _show("SELECT") == '"SELECT"'
+    assert _show("name") == "name" and _show("order_id") == "order_id"
+    assert _show("key") == "key"  # a keyword SQLite still accepts as a plain name
+
+
 def test_long_values_are_shortened(db):
     s = get_schema(db)
     assert "A" * MAX_VALUE_CHARS + "..." in s

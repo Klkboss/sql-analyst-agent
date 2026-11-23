@@ -7,6 +7,7 @@ Sample rows show the model real value formats (e.g. dates as '2009-01-01 00:00:0
 'USA' not 'United States'). Foreign keys tell it how to join tables.
 """
 import re
+import sqlite3
 from contextlib import closing
 from functools import lru_cache
 from pathlib import Path
@@ -22,9 +23,24 @@ def _q(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+@lru_cache(maxsize=None)
+def _needs_quotes(name: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z_]\w*", name):
+        return True  # spaces, symbols, leading digit...
+    # Keywords like ORDER break bare SQL (BIRD's financial.order table did). Rather than keep a
+    # keyword list, ask SQLite whether the bare name parses as a table and column name.
+    # Safe to format: the regex above allows only letters, digits and underscores.
+    try:
+        with closing(sqlite3.connect(":memory:")) as c:
+            c.execute(f'WITH {name} AS (SELECT 1 AS "{name}") SELECT {name} FROM {name}')  # nosemgrep
+        return False
+    except sqlite3.Error:
+        return True
+
+
 def _show(name: str) -> str:
-    """Name as the model should write it: bare if it's a plain identifier, else quoted."""
-    return name if re.fullmatch(r"[A-Za-z_]\w*", name) else _q(name)
+    """Name as the model should write it: bare if SQLite accepts it bare, else quoted."""
+    return _q(name) if _needs_quotes(name) else name
 
 
 def _short(value) -> str:
