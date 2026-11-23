@@ -1,0 +1,365 @@
+question_id,db_id,difficulty,ex,ex_lenient,reason,retries,latency_ms,select_ms,tokens_per_sec,prompt_tokens_est,selected_tables,ctx_overflow,tokens,error,pred_rows,pred_preview,gold_preview,pred_sql,gold_sql,question,evidence,attempts
+8,california_schools,simple,0,0,wrong_result,0,15115,2252,479.9,1835,"frpm,satscores",0,2346,,1,"[('Paramount High', 4419.0, 459)]","[(459,)]","SELECT 
+    s.sname AS ""School Name"",
+    f.""FRPM Count (K-12)"" AS ""FRPM Count (K-12)"",
+    s.NumTstTakr AS ""SAT Test Takers""
+FROM frpm AS f
+JOIN satscores AS s
+    ON f.CDSCode = s.cds
+WHERE f.""FRPM Count (K-12)"" = (
+    SELECT MAX(""FRPM Count (K-12)"") 
+    FROM frpm
+);",SELECT NumTstTakr FROM satscores WHERE cds = ( SELECT CDSCode FROM frpm ORDER BY `FRPM Count (K-12)` DESC LIMIT 1 ),What is the number of SAT test takers of the schools with the highest FRPM count for K-12 students?,,"[{""sql"": ""SELECT \n    s.sname AS \""School Name\"",\n    f.\""FRPM Count (K-12)\"" AS \""FRPM Count (K-12)\"",\n    s.NumTstTakr AS \""SAT Test Takers\""\nFROM frpm AS f\nJOIN satscores AS s\n    ON f.CDSCode = s.cds\nWHERE f.\""FRPM Count (K-12)\"" = (\n    SELECT MAX(\""FRPM Count (K-12)\"") \n    FROM frpm\n);"", ""error"": null}]"
+28,california_schools,challenging,0,0,wrong_result,0,28749,4863,477.8,2929,"frpm,schools",0,3229,,57,"[('Mountain Oaks', 'County Office of Education (COE)'), ('Castle Rock', 'County Office of Education (COE)'), ('Charter Community School Home Study Academy', 'County Office of Education (COE)')]","[('Mountain Oaks', '00'), ('Castle Rock', '00'), ('Charter Community School Home Study Academy', '00')]","WITH diffs AS (
+    SELECT
+        f.CDSCode,
+        f.""Enrollment (K-12)"" - f.""Enrollment (Ages 5-17)"" AS diff
+    FROM frpm f
+    JOIN schools s ON s.CDSCode = f.CDSCode
+    WHERE s.FundingType = 'Locally funded'
+),
+avg_diff AS (
+    SELECT AVG(diff) AS avg_diff FROM diffs
+)
+SELECT
+    s.""School"" AS ""School Name"",
+    s.""DOCType""
+FROM diffs d
+JOIN avg_diff a ON 1=1
+JOIN schools s ON s.CDSCode = d.CDSCode
+WHERE d.diff > a.avg_diff;","SELECT T2.School, T2.DOC FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.FundingType = 'Locally funded' AND (T1.`Enrollment (K-12)` - T1.`Enrollment (Ages 5-17)`) > (SELECT AVG(T3.`Enrollment (K-12)` - T3.`Enrollment (Ages 5-17)`) FROM frpm AS T3 INNER JOIN schools AS T4 ON T3.CDSCode = T4.CDSCode WHERE T4.FundingType = 'Locally funded')","Consider the average difference between K-12 enrollment and 15-17 enrollment of schools that are locally funded, list the names and DOC type of schools which has a difference above this average.",Difference between K-12 enrollment and 15-17 enrollment can be computed by `Enrollment (K-12)` - `Enrollment (Ages 5-17)`,"[{""sql"": ""WITH diffs AS (\n    SELECT\n        f.CDSCode,\n        f.\""Enrollment (K-12)\"" - f.\""Enrollment (Ages 5-17)\"" AS diff\n    FROM frpm f\n    JOIN schools s ON s.CDSCode = f.CDSCode\n    WHERE s.FundingType = 'Locally funded'\n),\navg_diff AS (\n    SELECT AVG(diff) AS avg_diff FROM diffs\n)\nSELECT\n    s.\""School\"" AS \""School Name\"",\n    s.\""DOCType\""\nFROM diffs d\nJOIN avg_diff a ON 1=1\nJOIN schools s ON s.CDSCode = d.CDSCode\nWHERE d.diff > a.avg_diff;"", ""error"": null}]"
+42,california_schools,simple,0,0,wrong_result,0,12045,1381,484.3,2008,"satscores,schools",0,2295,,1,"[('9-12',)]","[('Traditional',)]","SELECT s.""GSoffered""
+FROM satscores AS sc
+JOIN schools AS s ON sc.cds = s.CDSCode
+ORDER BY sc.""AvgScrMath"" DESC
+LIMIT 1;",SELECT T2.EdOpsName FROM satscores AS T1 INNER JOIN schools AS T2 ON T1.cds = T2.CDSCode ORDER BY T1.AvgScrMath DESC LIMIT 1,What is the type of education offered in the school who scored the highest average in Math?,,"[{""sql"": ""SELECT s.\""GSoffered\""\nFROM satscores AS sc\nJOIN schools AS s ON sc.cds = s.CDSCode\nORDER BY sc.\""AvgScrMath\"" DESC\nLIMIT 1;"", ""error"": null}]"
+45,california_schools,moderate,1,1,,0,16438,4393,478.7,2053,"satscores,schools",0,2300,,1,"[('Buchanan High', 507)]","[('Buchanan High', 507)]","SELECT 
+    ss.sname AS School,
+    ss.AvgScrWrite AS AvgWritingScore
+FROM satscores AS ss
+JOIN schools AS sc ON ss.cds = sc.CDSCode
+WHERE (sc.AdmFName1 = 'Ricci' AND sc.AdmLName1 = 'Ulrich')
+   OR (sc.AdmFName2 = 'Ricci' AND sc.AdmLName2 = 'Ulrich')
+   OR (sc.AdmFName3 = 'Ricci' AND sc.AdmLName3 = 'Ulrich');","SELECT T2.School, T1.AvgScrWrite FROM satscores AS T1 INNER JOIN schools AS T2 ON T1.cds = T2.CDSCode WHERE T2.AdmFName1 = 'Ricci' AND T2.AdmLName1 = 'Ulrich'",What is the average writing score of each of the schools managed by Ricci Ulrich? List the schools and the corresponding average writing scores.,"Usually, administrators manage the school stuff.","[{""sql"": ""SELECT \n    ss.sname AS School,\n    ss.AvgScrWrite AS AvgWritingScore\nFROM satscores AS ss\nJOIN schools AS sc ON ss.cds = sc.CDSCode\nWHERE (sc.AdmFName1 = 'Ricci' AND sc.AdmLName1 = 'Ulrich')\n   OR (sc.AdmFName2 = 'Ricci' AND sc.AdmLName2 = 'Ulrich')\n   OR (sc.AdmFName3 = 'Ricci' AND sc.AdmLName3 = 'Ulrich');"", ""error"": null}]"
+46,california_schools,simple,0,0,wrong_result,0,20776,4897,284.1,2865,"frpm,schools",0,581,,1,"[('CA', 60.0)]","[('California School for the Deaf-Fremont',)]","SELECT
+    s.""State"" AS ""State"",
+    SUM(f.""Enrollment (K-12)"") AS ""Total Enrollment (K-12)""
+FROM frpm AS f
+JOIN schools AS s
+    ON f.CDSCode = s.CDSCode
+WHERE s.""DOC"" = '31'
+  AND f.""Low Grade"" <= '1'
+  AND f.""High Grade"" >= '12'
+GROUP BY s.""State""
+ORDER BY ""Total Enrollment (K-12)"" DESC
+LIMIT 1;",SELECT T2.School FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.DOC = 31 ORDER BY T1.`Enrollment (K-12)` DESC LIMIT 1,Which state special schools have the highest number of enrollees from grades 1 through 12?,State Special Schools refers to DOC = 31; Grades 1 through 12 means K-12,"[{""sql"": ""SELECT\n    s.\""State\"" AS \""State\"",\n    SUM(f.\""Enrollment (K-12)\"") AS \""Total Enrollment (K-12)\""\nFROM frpm AS f\nJOIN schools AS s\n    ON f.CDSCode = s.CDSCode\nWHERE s.\""DOC\"" = '31'\n  AND f.\""Low Grade\"" <= '1'\n  AND f.\""High Grade\"" >= '12'\nGROUP BY s.\""State\""\nORDER BY \""Total Enrollment (K-12)\"" DESC\nLIMIT 1;"", ""error"": null}]"
+52,california_schools,simple,1,1,,0,1854,925,469.3,2053,"satscores,schools",0,1598,,1,"[(2,)]","[(2,)]","SELECT COUNT(*) AS total_schools
+FROM satscores
+JOIN schools ON satscores.cds = schools.CDSCode
+WHERE (AvgScrRead + AvgScrMath + AvgScrWrite) >= 1500
+  AND schools.""MailCity"" = 'Lakeport';",SELECT COUNT(T1.cds) FROM satscores AS T1 INNER JOIN schools AS T2 ON T1.cds = T2.CDSCode WHERE T2.MailCity = 'Lakeport' AND (T1.AvgScrRead + T1.AvgScrMath + T1.AvgScrWrite) >= 1500,What is the total number of schools whose total SAT scores are greater or equal to 1500 whose mailing city is Lakeport?,Total SAT scores can be computed by AvgScrRead + AvgScrMath + AvgScrWrite,"[{""sql"": ""SELECT COUNT(*) AS total_schools\nFROM satscores\nJOIN schools ON satscores.cds = schools.CDSCode\nWHERE (AvgScrRead + AvgScrMath + AvgScrWrite) >= 1500\n  AND schools.\""MailCity\"" = 'Lakeport';"", ""error"": null}]"
+54,california_schools,simple,0,0,wrong_result,0,12616,971,480.4,1707,schools,0,2109,,5,"[('Madera County Independent Academy', '93637'), ('Enterprise Secondary', '93637'), ('Juvenile Hall (Endeavor/Voyager Secondary)', '93637')]","[('Fairview Middle', '93926-0238')]","SELECT
+    School,
+    MailZip
+FROM schools
+WHERE (AdmFName1 = 'Avetik' AND AdmLName1 = 'Atoian')
+   OR (AdmFName2 = 'Avetik' AND AdmLName2 = 'Atoian')
+   OR (AdmFName3 = 'Avetik' AND AdmLName3 = 'Atoian');","SELECT School, MailZip FROM schools WHERE AdmFName1 = 'Avetik' AND AdmLName1 = 'Atoian'",Please specify all of the schools and their related mailing zip codes that are under Avetik Atoian's administration.,,"[{""sql"": ""SELECT\n    School,\n    MailZip\nFROM schools\nWHERE (AdmFName1 = 'Avetik' AND AdmLName1 = 'Atoian')\n   OR (AdmFName2 = 'Avetik' AND AdmLName2 = 'Atoian')\n   OR (AdmFName3 = 'Avetik' AND AdmLName3 = 'Atoian');"", ""error"": null}]"
+62,california_schools,challenging,1,1,,0,17677,3278,478.1,2944,"frpm,schools",0,2641,,1,"[(1,)]","[(1,)]","SELECT COUNT(*) AS total_non_chartered_schools
+FROM frpm
+JOIN schools ON frpm.CDSCode = schools.CDSCode
+WHERE schools.Charter = 0
+  AND schools.County = 'Los Angeles'
+  AND (""Free Meal Count (K-12)"" * 100.0) / ""Enrollment (K-12)"" < 0.18;",SELECT COUNT(T2.School) FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.County = 'Los Angeles' AND T2.Charter = 0 AND CAST(T1.`Free Meal Count (K-12)` AS REAL) * 100 / T1.`Enrollment (K-12)` < 0.18,What is the total number of non-chartered schools in the county of Los Angeles with a percent (%) of eligible free meals for grades 1 through 12 that is less than 0.18%?,non-chartered schools refer to schools whose Charter = 0; K-12 means grades 1 through 12; percent of eligible free rate for K-12 = `Free Meal Count (K-12)` * 100 / `Enrollment (K-12)`,"[{""sql"": ""SELECT COUNT(*) AS total_non_chartered_schools\nFROM frpm\nJOIN schools ON frpm.CDSCode = schools.CDSCode\nWHERE schools.Charter = 0\n  AND schools.County = 'Los Angeles'\n  AND (\""Free Meal Count (K-12)\"" * 100.0) / \""Enrollment (K-12)\"" < 0.18;"", ""error"": null}]"
+70,california_schools,simple,0,0,empty_result,1,22240,4783,480.9,2833,"frpm,schools",0,1115,,0,[],"[(2,)]","SELECT 
+    s.""StatusType"" AS status,
+    COUNT(*) AS school_count
+FROM schools AS s
+JOIN frpm AS f
+    ON s.""CDSCode"" = f.""CDSCode""
+WHERE s.""County"" = 'Alpine'
+  AND f.""School Type"" = 'District Community Day School'
+  AND s.""StatusType"" IN ('Active', 'Closed')
+GROUP BY s.""StatusType"";",SELECT COUNT(School) FROM schools WHERE (StatusType = 'Closed' OR StatusType = 'Active') AND SOC = 69 AND County = 'Alpine',How many active and closed District Community Day Schools are there in the county of Alpine?,,"[{""sql"": ""SELECT \n    s.\""StatusType\"" AS status,\n    COUNT(*) AS school_count\nFROM schools AS s\nJOIN frpm AS f\n    ON s.\""CDSCode\"" = f.\""CDSCode\""\nWHERE s.\""County\"" = 'Alpine'\n  AND f.\""School Type\"" = 'District Community Day School'\n  AND s.\""StatusType\"" IN ('Active', 'Closed')\nGROUP BY s.\""StatusType\"";"", ""error"": ""The query ran but returned 0 rows. Check WHERE values against the sample rows (spelling, case, format) and the join conditions. If 0 rows is truly the correct answer, return the same query unchanged.""}, {""sql"": ""SELECT \n    s.\""StatusType\"" AS status,\n    COUNT(*) AS school_count\nFROM schools AS s\nJOIN frpm AS f\n    ON s.\""CDSCode\"" = f.\""CDSCode\""\nWHERE s.\""County\"" = 'Alpine'\n  AND f.\""School Type\"" = 'District Community Day School'\n  AND s.\""StatusType\"" IN ('Active', 'Closed')\nGROUP BY s.\""StatusType\"";"", ""error"": null}]"
+73,california_schools,simple,0,0,empty_result,1,27789,1166,436.3,2852,"frpm,schools",0,4543,,0,[],"[(5.0,)]","SELECT f.""FRPM Count (Ages 5-17)""
+FROM frpm AS f
+JOIN schools AS s ON f.CDSCode = s.CDSCode
+WHERE s.""MailStreet"" = 'PO Box 1040'
+  AND s.""School"" = 'Youth Authority School';",SELECT T1.`FRPM Count (Ages 5-17)` FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.MailStreet = 'PO Box 1040' AND T2.SOCType = 'Youth Authority Facilities',What is the free or reduced price meal count for ages 5 to 17 in the Youth Authority School with a mailing street address of PO Box 1040?,,"[{""sql"": ""SELECT f.\""FRPM Count (Ages 5-17)\""\nFROM frpm AS f\nJOIN schools AS s ON f.CDSCode = s.CDSCode\nWHERE s.\""MailStreet\"" = 'PO Box 1040'\n  AND s.\""School\"" = 'Youth Authority School';"", ""error"": ""The query ran but returned 0 rows. Check WHERE values against the sample rows (spelling, case, format) and the join conditions. If 0 rows is truly the correct answer, return the same query unchanged.""}, {""sql"": ""SELECT f.\""FRPM Count (Ages 5-17)\""\nFROM frpm AS f\nJOIN schools AS s ON f.CDSCode = s.CDSCode\nWHERE s.\""MailStreet\"" = 'PO Box 1040'\n  AND s.\""School\"" = 'Youth Authority School';"", ""error"": null}]"
+74,california_schools,moderate,1,1,,0,13805,886,465.5,2901,"frpm,schools",0,2992,,1,"[('K',)]","[('K',)]","SELECT f.""Low Grade""
+FROM frpm AS f
+JOIN schools AS s ON f.CDSCode = s.CDSCode
+WHERE s.EdOpsCode = 'SPECON'
+  AND s.NCESDist = '0613360';",SELECT MIN(T1.`Low Grade`) FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.NCESDist = '0613360' AND T2.EdOpsCode = 'SPECON',What is the lowest grade for the District Special Education Consortia School with National Center for Educational Statistics school district identification number of 0613360?,District Special Education Consortia School refers to EdOpsCode = 'SPECON'.,"[{""sql"": ""SELECT f.\""Low Grade\""\nFROM frpm AS f\nJOIN schools AS s ON f.CDSCode = s.CDSCode\nWHERE s.EdOpsCode = 'SPECON'\n  AND s.NCESDist = '0613360';"", ""error"": null}]"
+81,california_schools,moderate,1,1,,0,23543,6274,472.5,2880,"frpm,schools",0,968,,1,"[('Oroville', '7', 'Central Middle - RISE')]","[('Oroville', '7', 'Central Middle - RISE')]","SELECT 
+    s.City,
+    frpm.""Low Grade"",
+    frpm.""School Name""
+FROM frpm
+JOIN schools AS s ON frpm.CDSCode = s.CDSCode
+WHERE s.State = 'CA'
+ORDER BY s.Latitude ASC
+LIMIT 1;","SELECT T2.City, T1.`Low Grade`, T1.`School Name` FROM frpm AS T1 INNER JOIN schools AS T2 ON T1.CDSCode = T2.CDSCode WHERE T2.State = 'CA' ORDER BY T2.Latitude ASC LIMIT 1",In which city can you find the school in the state of California with the lowest latitude coordinates and what is its lowest grade? Indicate the school name.,State of California refers to state = 'CA',"[{""sql"": ""SELECT \n    s.City,\n    frpm.\""Low Grade\"",\n    frpm.\""School Name\""\nFROM frpm\nJOIN schools AS s ON frpm.CDSCode = s.CDSCode\nWHERE s.State = 'CA'\nORDER BY s.Latitude ASC\nLIMIT 1;"", ""error"": null}]"
+346,card_games,moderate,1,1,,0,6048,849,477.5,2759,"cards,legalities",0,2826,,29936,"[(5, 'Rebecca Guay'), (6, 'Rob Alexander'), (10, 'Daren Bader')]","[(5, 'Rebecca Guay'), (6, 'Rob Alexander'), (10, 'Daren Bader')]","SELECT c.id, c.artist
+FROM cards AS c
+JOIN legalities AS l ON l.uuid = c.uuid
+WHERE l.format = 'commander'
+  AND l.status = 'Legal'
+  AND (c.power IS NULL OR c.power = '*');","SELECT T1.id, T1.artist FROM cards AS T1 INNER JOIN legalities AS T2 ON T1.uuid = T2.uuid WHERE T2.status = 'Legal' AND T2.format = 'commander' AND (T1.power IS NULL OR T1.power = '*')",List all the card id and artist with unknown power which are legal for commander play format.,unknown power refers to power = '*' or POWER IS NULL; commander play format refers to format = 'commander'; legal for commander play format refers to format = 'commander' where status = 'Legal',"[{""sql"": ""SELECT c.id, c.artist\nFROM cards AS c\nJOIN legalities AS l ON l.uuid = c.uuid\nWHERE l.format = 'commander'\n  AND l.status = 'Legal'\n  AND (c.power IS NULL OR c.power = '*');"", ""error"": null}]"
+347,card_games,moderate,1,1,,0,24048,4073,481.7,2832,"cards,rulings",0,3152,,23,"[(29, 'You can’t put an Aura card from your hand onto the battlefield this way if that Aura can’t legally enchant Academy Researchers. For example, you can’t put an Aura with “enchant land” or “enchan","[(29, 'You can’t put an Aura card from your hand onto the battlefield this way if that Aura can’t legally enchant Academy Researchers. For example, you can’t put an Aura with “enchant land” or “enchan","SELECT
+    c.id,
+    r.text AS ruling_text,
+    c.hasContentWarning AS has_content_warning
+FROM cards AS c
+JOIN rulings AS r
+    ON r.uuid = c.uuid
+WHERE c.artist = 'Stephen Daniele';","SELECT T1.id, T2.text, T1.hasContentWarning FROM cards AS T1 INNER JOIN rulings AS T2 ON T1.uuid = T2.uuid WHERE T1.artist = 'Stephen Daniele'",Find all cards illustrated by Stephen Daniel and describe the text of the ruling of these cards. State if these cards have missing or degraded properties and values.,cards have missing or degraded properties and value refers to hasContentWarning = 1; 'Stephen Daniele' is artist; Find all cards refers to return card id,"[{""sql"": ""SELECT\n    c.id,\n    r.text AS ruling_text,\n    c.hasContentWarning AS has_content_warning\nFROM cards AS c\nJOIN rulings AS r\n    ON r.uuid = c.uuid\nWHERE c.artist = 'Stephen Daniele';"", ""error"": null}]"
+348,card_games,simple,0,0,wrong_result,0,22018,5061,473.0,2778,"cards,rulings",0,2902,,15,"[('2020-06-23', 'You can’t choose any one mode more than once.'), ('2020-06-23', 'If any of the targets become illegal, the remaining targets are affected as appropriate.'), ('2020-06-23', 'If you cho","[('You can’t choose any one mode more than once.',), ('If any of the targets become illegal, the remaining targets are affected as appropriate.',), ('If you choose more than one mode, you perform the ","SELECT
+    r.date,
+    r.text
+FROM
+    rulings AS r
+JOIN
+    cards AS c
+    ON c.uuid = r.uuid
+WHERE
+    c.name = 'Sublime Epiphany'
+    AND c.number = '74s';",SELECT T2.text FROM cards AS T1 INNER JOIN rulings AS T2 ON T1.uuid = T2.uuid WHERE T1.name = 'Sublime Epiphany' AND T1.number = '74s',Describe the information about rulings for card named 'Sublime Epiphany' with number 74s.,Sublime Epiphany' is name of cards; number 74s refers to number = '74s'; information refers to text;,"[{""sql"": ""SELECT\n    r.date,\n    r.text\nFROM\n    rulings AS r\nJOIN\n    cards AS c\n    ON c.uuid = r.uuid\nWHERE\n    c.name = 'Sublime Epiphany'\n    AND c.number = '74s';"", ""error"": null}]"
+391,card_games,moderate,0,0,wrong_result,0,25328,5203,471.8,2981,"cards,foreign_data",0,929,,80,"[(""Executioner's Capsule"", 'B', 'Artifact', 'German', 'Kapsel des Henkers', '{1}{B}, {T}, opfere die Kapsel des Henkers: Zerstöre eine nichtschwarze Kreatur deiner Wahl.'), (""Executioner's Capsule"", '","[(""Executioner's Capsule"",), ('Immortal Coil',), ('Onyx Goblet',)]","SELECT
+    c.name,
+    c.colors,
+    c.originalType,
+    f.language,
+    f.name AS foreign_name,
+    f.text AS foreign_text
+FROM cards AS c
+JOIN foreign_data AS f
+    ON f.uuid = c.uuid
+WHERE c.originalType = 'Artifact'
+  AND c.colors = 'B';",SELECT DISTINCT T1.name FROM cards AS T1 INNER JOIN foreign_data AS T2 ON T1.uuid = T2.uuid WHERE T1.originalType = 'Artifact' AND T1.colors = 'B',"Among the Artifact cards, which are black color and comes with foreign languague translation?",Artifact card refers to originalType = 'Artifact'; black color refers to colors = 'B'; foreign language refers to language in foreign_data,"[{""sql"": ""SELECT\n    c.name,\n    c.colors,\n    c.originalType,\n    f.language,\n    f.name AS foreign_name,\n    f.text AS foreign_text\nFROM cards AS c\nJOIN foreign_data AS f\n    ON f.uuid = c.uuid\nWHERE c.originalType = 'Artifact'\n  AND c.colors = 'B';"", ""error"": null}]"
+407,card_games,moderate,0,0,wrong_result,0,4436,924,475.0,2948,"cards,foreign_data",0,955,,492,"[('Legendäre Kreatur — Mensch, Rebell',), ('Legendäre Kreatur — Engel',), ('Legendäre Kreatur — Meervolk, Zauberer',)]","[('Human,Rebel', 'Legendary'), ('Angel', 'Legendary'), ('Merfolk,Wizard', 'Legendary')]","SELECT DISTINCT fd.type
+FROM foreign_data AS fd
+JOIN cards AS c ON fd.uuid = c.uuid
+WHERE fd.language = 'German'
+  AND c.subtypes IS NOT NULL
+  AND c.supertypes IS NOT NULL;","SELECT T1.subtypes, T1.supertypes FROM cards AS T1 INNER JOIN foreign_data AS T2 ON T1.uuid = T2.uuid WHERE T2.language = 'German' AND T1.subtypes IS NOT NULL AND T1.supertypes IS NOT NULL",Lists all types of cards in German.,"German refer to language; all types refer to the subtypes, supertypes; subtypes is not null AND supertypes is not null","[{""sql"": ""SELECT DISTINCT fd.type\nFROM foreign_data AS fd\nJOIN cards AS c ON fd.uuid = c.uuid\nWHERE fd.language = 'German'\n  AND c.subtypes IS NOT NULL\n  AND c.supertypes IS NOT NULL;"", ""error"": null}]"
+409,card_games,moderate,1,1,,0,8849,1154,479.6,2937,"cards,legalities,rulings",0,1230,,1,"[(16,)]","[(16,)]","SELECT COUNT(DISTINCT c.id) AS card_count
+FROM cards c
+JOIN legalities l ON l.uuid = c.uuid
+JOIN rulings r ON r.uuid = c.uuid
+WHERE l.format = 'premodern'
+  AND r.text = 'This is a triggered mana ability.'
+  AND c.side IS NULL;",SELECT COUNT(T1.id) FROM cards AS T1 INNER JOIN legalities AS T2 ON T1.uuid = T2.uuid INNER JOIN rulings AS T3 ON T1.uuid = T3.uuid WHERE T2.format = 'premodern' AND T3.text = 'This is a triggered mana ability.' AND T1.Side IS NULL,"Indicates the number of cards with pre-modern format, ruling text ""This is a triggered mana ability."" that do not have multiple faces.",pre-modern format refers to format = 'premodern' ;do not have multiple faces refers to side IS NULL,"[{""sql"": ""SELECT COUNT(DISTINCT c.id) AS card_count\nFROM cards c\nJOIN legalities l ON l.uuid = c.uuid\nJOIN rulings r ON r.uuid = c.uuid\nWHERE l.format = 'premodern'\n  AND r.text = 'This is a triggered mana ability.'\n  AND c.side IS NULL;"", ""error"": null}]"
+98,financial,moderate,0,0,empty_result,1,12774,0,479.7,2009,,0,2516,,0,[],"[(176,)]","WITH approved_1997 AS (
+    SELECT 
+        l.account_id,
+        l.amount,
+        a.frequency
+    FROM loan l
+    JOIN account a ON a.account_id = l.account_id
+    WHERE l.status = 'A'
+      AND strftime('%Y', l.date) = '1997'
+)
+, min_amount AS (
+    SELECT MIN(amount) AS amt FROM approved_1997
+)
+SELECT 
+    a.account_id,
+    a.amount,
+    a.frequency
+FROM approved_1997 a
+JOIN min_amount m ON a.amount = m.amt
+WHERE a.frequency = 'POPLATEK TYDNE';","SELECT T2.account_id FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id WHERE STRFTIME('%Y', T1.date) = '1997' AND T2.frequency = 'POPLATEK TYDNE' ORDER BY T1.amount LIMIT 1","Among the accounts who have approved loan date in 1997, list out the accounts that have the lowest approved amount and choose weekly issuance statement.",'POPLATEK TYDNE' stands for weekly issuance,"[{""sql"": ""WITH approved_1997 AS (\n    SELECT \n        l.account_id,\n        l.amount,\n        a.frequency\n    FROM loan l\n    JOIN account a ON a.account_id = l.account_id\n    WHERE l.status = 'A'\n      AND strftime('%Y', l.date) = '1997'\n)\n, min_amount AS (\n    SELECT MIN(amount) AS amt FROM approved_1997\n)\nSELECT \n    a.account_id,\n    a.amount,\n    a.frequency\nFROM approved_1997 a\nJOIN min_amount m ON a.amount = m.amt\nWHERE a.frequency = 'POPLATEK TYDNE';"", ""error"": ""The query ran but returned 0 rows. Check WHERE values against the sample rows (spelling, case, format) and the join conditions. If 0 rows is truly the correct answer, return the same query unchanged.""}, {""sql"": ""WITH approved_1997 AS (\n    SELECT \n        l.account_id,\n        l.amount,\n        a.frequency\n    FROM loan l\n    JOIN account a ON a.account_id = l.account_id\n    WHERE l.status = 'A'\n      AND strftime('%Y', l.date) = '1997'\n)\n, min_amount AS (\n    SELECT MIN(amount) AS amt FROM approved_1997\n)\nSELECT \n    a.account_id,\n    a.amount,\n    a.frequency\nFROM approved_1997 a\nJOIN min_amount m ON a.amount = m.amt\nWHERE a.frequency = 'POPLATEK TYDNE';"", ""error"": null}]"
+113,financial,simple,1,1,,0,2468,0,472.2,1958,,0,220,,1,"[('1970-09-10',)]","[('1970-09-10',)]","SELECT c.birth_date
+FROM loan l
+JOIN account a ON l.account_id = a.account_id
+JOIN disp d ON a.account_id = d.account_id
+JOIN client c ON d.client_id = c.client_id
+WHERE l.amount = 98832
+  AND l.date = '1996-01-03';",SELECT T4.birth_date FROM loan AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN disp AS T3 ON T2.account_id = T3.account_id INNER JOIN client AS T4 ON T3.client_id = T4.client_id WHERE T1.date = '1996-01-03' AND T1.amount = 98832,"For the client who applied 98832 USD loan in 1996/1/3, when was his/her birthday?",,"[{""sql"": ""SELECT c.birth_date\nFROM loan l\nJOIN account a ON l.account_id = a.account_id\nJOIN disp d ON a.account_id = d.account_id\nJOIN client c ON d.client_id = c.client_id\nWHERE l.amount = 98832\n  AND l.date = '1996-01-03';"", ""error"": null}]"
+117,financial,moderate,0,1,format_only,0,2380,0,384.7,2045,,0,200,,1,"[(18.02,)]","[(18.01559415907576,)]","SELECT 
+    ROUND(100.0 * SUM(CASE WHEN status = 'A' THEN amount ELSE 0 END) / SUM(amount), 2) AS percentage_fully_paid
+FROM loan;",SELECT (CAST(SUM(CASE WHEN status = 'A' THEN amount ELSE 0 END) AS REAL) * 100) / SUM(amount) FROM loan,What is the percentage of loan amount that has been fully paid with no issue.,"Loan paid with no issue means contract finished, no problems; status = 'A' means contract finished, no problems; Percentage of accounts by condition = [(total(amount) & condition) / (total amount)] * 100%","[{""sql"": ""SELECT \n    ROUND(100.0 * SUM(CASE WHEN status = 'A' THEN amount ELSE 0 END) / SUM(amount), 2) AS percentage_fully_paid\nFROM loan;"", ""error"": null}]"
+128,financial,moderate,1,1,,0,4008,0,483.3,1999,,0,1788,,9,"[('Hl.m. Praha', 324), ('Karvina', 88), ('Ostrava - mesto', 84)]","[('Hl.m. Praha', 324), ('Karvina', 88), ('Ostrava - mesto', 84)]","SELECT
+    d.A2 AS district_name,
+    COUNT(*) AS female_account_holders
+FROM client c
+JOIN district d ON c.district_id = d.district_id
+WHERE c.gender = 'F'
+GROUP BY d.district_id, d.A2
+ORDER BY female_account_holders DESC
+LIMIT 9;","SELECT T2.A2, COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE T1.gender = 'F' GROUP BY T2.district_id, T2.A2 ORDER BY COUNT(T1.client_id) DESC LIMIT 9","List the top nine districts, by descending order, from the highest to the lowest, the number of female account holders.",A2 refers to districts; Female refers to gender = 'F',"[{""sql"": ""SELECT\n    d.A2 AS district_name,\n    COUNT(*) AS female_account_holders\nFROM client c\nJOIN district d ON c.district_id = d.district_id\nWHERE c.gender = 'F'\nGROUP BY d.district_id, d.A2\nORDER BY female_account_holders DESC\nLIMIT 9;"", ""error"": null}]"
+133,financial,simple,0,0,wrong_result,0,11671,0,478.4,2000,,0,1802,,1,"[('Most', 'north Bohemia', 9.4)]","[(39, 'Most')]","SELECT
+    d.A2 AS district_name,
+    d.A3 AS branch_location,
+    d.A13 AS unemployment_rate_1996
+FROM district d
+WHERE d.A13 = (SELECT MAX(A13) FROM district);","SELECT district_id, A2 FROM district ORDER BY A13 DESC LIMIT 1","In 1996, which districts have the highest unemployment rate? List their branch location and district name.",A2 refers to district names; A13 refers to unemploymant rate in 1996,"[{""sql"": ""SELECT\n    d.A2 AS district_name,\n    d.A3 AS branch_location,\n    d.A13 AS unemployment_rate_1996\nFROM district d\nWHERE d.A13 = (SELECT MAX(A13) FROM district);"", ""error"": null}]"
+137,financial,moderate,1,1,,0,12647,0,482.0,1999,,0,1821,,1,"[(47,)]","[(47,)]","SELECT COUNT(DISTINCT a.account_id) AS running_contract_accounts
+FROM account AS a
+JOIN loan AS l ON a.account_id = l.account_id
+WHERE a.district_id = 1
+  AND l.status IN ('C', 'D');",SELECT COUNT(T1.account_id) FROM account AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id INNER JOIN loan AS T3 ON T1.account_id = T3.account_id WHERE T1.district_id = 1 AND (T3.status = 'C' OR T3.status = 'D'),How many accounts have running contracts in Branch location 1?,"Status = 'C' stands for running contract, OK so far; Status = 'D' stands for running contract, client in debt","[{""sql"": ""SELECT COUNT(DISTINCT a.account_id) AS running_contract_accounts\nFROM account AS a\nJOIN loan AS l ON a.account_id = l.account_id\nWHERE a.district_id = 1\n  AND l.status IN ('C', 'D');"", ""error"": null}]"
+150,financial,moderate,0,0,wrong_result,1,29230,0,373.1,1989,,0,2179,,1,"[(0,)]","[(2260,)]","SELECT COUNT(DISTINCT a.account_id) AS account_count
+FROM account AS a
+JOIN district AS d ON a.district_id = d.district_id
+JOIN trans AS t ON a.account_id = t.account_id
+WHERE d.A3 = 'North Bohemia'
+  AND t.bank = 'AB';",SELECT COUNT(T2.account_id) FROM district AS T1 INNER JOIN account AS T2 ON T1.district_id = T2.district_id INNER JOIN trans AS T3 ON T2.account_id = T3.account_id WHERE T3.bank = 'AB' AND T1.A3 = 'north Bohemia',How many accounts in North Bohemia has made a transaction with the partner's bank being AB?,A3 contains the region names; North Bohemia is a region.,"[{""sql"": ""SELECT COUNT(DISTINCT a.account_id) AS account_count\nFROM account AS a\nJOIN district AS d ON a.district_id = d.district_id\nJOIN trans AS t ON a.account_id = t.account_id\nWHERE d.A3 = 'North Bohemia'\n  AND t.bank = 'AB';"", ""error"": ""The query returned a single row of 0/NULL, which often means a filter matched nothing (e.g. a misspelled value or wrong join). Check WHERE values against the sample rows. If 0 is truly the correct answer, return the same query unchanged.""}, {""sql"": ""SELECT COUNT(DISTINCT a.account_id) AS account_count\nFROM account AS a\nJOIN district AS d ON a.district_id = d.district_id\nJOIN trans AS t ON a.account_id = t.account_id\nWHERE d.A3 = 'North Bohemia'\n  AND t.bank = 'AB';"", ""error"": null}]"
+153,financial,simple,1,1,,0,2637,0,485.7,1970,,0,1737,,1,"[(659,)]","[(659,)]","SELECT COUNT(*) AS classic_owner_cards
+FROM card
+JOIN disp ON card.disp_id = disp.disp_id
+JOIN account ON disp.account_id = account.account_id
+WHERE card.type = 'classic'
+  AND disp.type = 'OWNER';",SELECT COUNT(T1.card_id) FROM card AS T1 INNER JOIN disp AS T2 ON T1.disp_id = T2.disp_id WHERE T1.type = 'classic' AND T2.type = 'OWNER',How many 'classic' cards are eligible for loan?,"when the account type = 'OWNER', it's eligible for loan","[{""sql"": ""SELECT COUNT(*) AS classic_owner_cards\nFROM card\nJOIN disp ON card.disp_id = disp.disp_id\nJOIN account ON disp.account_id = account.account_id\nWHERE card.type = 'classic'\n  AND disp.type = 'OWNER';"", ""error"": null}]"
+158,financial,simple,1,1,,0,10521,0,324.5,1957,,0,177,,1,"[(64,)]","[(64,)]","SELECT a.district_id
+FROM ""order"" o
+JOIN account a ON o.account_id = a.account_id
+WHERE o.order_id = 33333;",SELECT T3.district_id FROM `order` AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN district AS T3 ON T2.district_id = T3.district_id WHERE T1.order_id = 33333,What is the district Id of the account that placed the order with the id 33333?,,"[{""sql"": ""SELECT a.district_id\nFROM \""order\"" o\nJOIN account a ON o.account_id = a.account_id\nWHERE o.order_id = 33333;"", ""error"": null}]"
+159,financial,simple,0,0,wrong_result,0,1226,0,479.3,1983,,0,1872,,5599,"[(7102, 27, '1995-06-17', 'VYDAJ', 'VYBER', 4500, 30777, None, None, None), (7108, 27, '1995-01-27', 'VYDAJ', 'VYBER', 4300, 18385, None, None, None), (7109, 27, '1996-01-10', 'VYDAJ', 'VYBER', 8800, ","[(816173,), (816174,), (816175,)]","SELECT
+    trans.trans_id,
+    trans.account_id,
+    trans.date,
+    trans.type,
+    trans.operation,
+    trans.amount,
+    trans.balance,
+    trans.k_symbol,
+    trans.bank,
+    trans.account
+FROM client
+JOIN account ON client.district_id = account.district_id
+JOIN trans ON account.account_id = trans.account_id
+WHERE client.client_id = 3356
+  AND trans.operation = 'VYBER';",SELECT T4.trans_id FROM client AS T1 INNER JOIN disp AS T2 ON T1.client_id = T2.client_id INNER JOIN account AS T3 ON T2.account_id = T3.account_id INNER JOIN trans AS T4 ON T3.account_id = T4.account_id WHERE T1.client_id = 3356 AND T4.operation = 'VYBER',List all the withdrawals in cash transactions that the client with the id 3356 makes.,operation = 'VYBER' refers to withdrawal in cash,"[{""sql"": ""SELECT\n    trans.trans_id,\n    trans.account_id,\n    trans.date,\n    trans.type,\n    trans.operation,\n    trans.amount,\n    trans.balance,\n    trans.k_symbol,\n    trans.bank,\n    trans.account\nFROM client\nJOIN account ON client.district_id = account.district_id\nJOIN trans ON account.account_id = trans.account_id\nWHERE client.client_id = 3356\n  AND trans.operation = 'VYBER';"", ""error"": null}]"
+164,financial,simple,0,0,wrong_result,0,14543,0,478.1,1941,,0,1828,,45,"[(161, 'F', '1943-10-07', 34), (240, 'F', '1929-06-17', 34), (372, 'M', '1932-04-03', 34)]","[(2497,)]","SELECT 
+    client.client_id,
+    client.gender,
+    client.birth_date,
+    client.district_id
+FROM client
+JOIN account 
+    ON client.district_id = account.district_id
+JOIN ""order"" 
+    ON account.account_id = ""order"".account_id
+WHERE ""order"".order_id = 32423;",SELECT T3.client_id FROM `order` AS T1 INNER JOIN account AS T2 ON T1.account_id = T2.account_id INNER JOIN disp AS T4 ON T4.account_id = T2.account_id  INNER JOIN client AS T3 ON T4.client_id = T3.client_id WHERE T1.order_id = 32423,Who placed the order with the id 32423?,,"[{""sql"": ""SELECT \n    client.client_id,\n    client.gender,\n    client.birth_date,\n    client.district_id\nFROM client\nJOIN account \n    ON client.district_id = account.district_id\nJOIN \""order\"" \n    ON account.account_id = \""order\"".account_id\nWHERE \""order\"".order_id = 32423;"", ""error"": null}]"
+171,financial,moderate,0,0,wrong_result,1,17358,0,426.4,2068,,0,746,,1,"[(None,)]","[(-17734,)]","SELECT
+    (SELECT SUM(A16) FROM district WHERE A3 = 'North Bohemia') -
+    (SELECT SUM(A16) FROM district WHERE A3 = 'East Bohemia') AS crime_difference_1996;","SELECT SUM(IIF(A3 = 'east Bohemia', A16, 0)) - SUM(IIF(A3 = 'north Bohemia', A16, 0)) FROM district",What was the difference in the number of crimes committed in East and North Bohemia in 1996?,Difference in no. of committed crimes between 2 regions = Total no. of committed crimes in 1996 in north Bohemia - Total no. of committed crimes in 1996 in e ast Bohemia. A3 refers to region. Data about no. of committed crimes 1996 appears in A16,"[{""sql"": ""SELECT\n    (SELECT SUM(A16) FROM district WHERE A3 = 'North Bohemia') -\n    (SELECT SUM(A16) FROM district WHERE A3 = 'East Bohemia') AS crime_difference_1996;"", ""error"": ""The query ran but every value is NULL. Check the columns, joins and aggregates. If that is truly correct, return the same query unchanged.""}, {""sql"": ""SELECT\n    (SELECT SUM(A16) FROM district WHERE A3 = 'North Bohemia') -\n    (SELECT SUM(A16) FROM district WHERE A3 = 'East Bohemia') AS crime_difference_1996;"", ""error"": null}]"
+172,financial,simple,0,0,wrong_result,0,860,0,478.2,1964,,0,191,,2,"[('DISPONENT', 3), ('OWNER', 10)]","[(10, 3)]","SELECT
+    d.type,
+    COUNT(*) AS disposition_count
+FROM disp AS d
+WHERE d.account_id BETWEEN 1 AND 10
+GROUP BY d.type;","SELECT SUM(type = 'OWNER') , SUM(type = 'DISPONENT') FROM disp WHERE account_id BETWEEN 1 AND 10",How many owner and disponent dispositions are there from account number 1 to account number 10?,,"[{""sql"": ""SELECT\n    d.type,\n    COUNT(*) AS disposition_count\nFROM disp AS d\nWHERE d.account_id BETWEEN 1 AND 10\nGROUP BY d.type;"", ""error"": null}]"
+190,financial,simple,1,1,,0,2399,0,480.9,1980,,0,1757,,1,"[(6,)]","[(6,)]","SELECT COUNT(*) AS client_count
+FROM client
+JOIN district USING (district_id)
+WHERE strftime('%Y', client.birth_date) = '1920'
+  AND district.A3 = 'east Bohemia';","SELECT COUNT(T1.client_id) FROM client AS T1 INNER JOIN district AS T2 ON T1.district_id = T2.district_id WHERE STRFTIME('%Y', T1.birth_date) = '1920' AND T2.A3 = 'east Bohemia'",How many clients who were born in 1920 stay in east Bohemia?,"East Bohemia appears in the column A3, which refers to the region.","[{""sql"": ""SELECT COUNT(*) AS client_count\nFROM client\nJOIN district USING (district_id)\nWHERE strftime('%Y', client.birth_date) = '1920'\n  AND district.A3 = 'east Bohemia';"", ""error"": null}]"
+206,toxicology,challenging,1,1,,0,6361,0,386.8,820,,0,400,,1,"[('c',)]","[('c',)]","SELECT DISTINCT a.element
+FROM atom a
+JOIN connected c ON a.atom_id = c.atom_id
+WHERE c.bond_id = 'TR004_8_9'
+UNION
+SELECT DISTINCT a.element
+FROM atom a
+JOIN connected c ON a.atom_id = c.atom_id2
+WHERE c.bond_id = 'TR004_8_9';",SELECT DISTINCT T1.element FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id WHERE T2.bond_id = 'TR004_8_9',What elements are in the TR004_8_9 bond atoms?,TR004_8_9 bond atoms refers to bond_id = 'TR004_8_9';,"[{""sql"": ""SELECT DISTINCT a.element\nFROM atom a\nJOIN connected c ON a.atom_id = c.atom_id\nWHERE c.bond_id = 'TR004_8_9'\nUNION\nSELECT DISTINCT a.element\nFROM atom a\nJOIN connected c ON a.atom_id = c.atom_id2\nWHERE c.bond_id = 'TR004_8_9';"", ""error"": null}]"
+213,toxicology,moderate,1,1,,0,2455,0,474.3,869,,0,250,,2,"[('-',), ('-',)]","[('-',), ('-',)]","SELECT b.bond_type
+FROM connected c
+JOIN bond b ON c.bond_id = b.bond_id
+WHERE (c.atom_id = 'TR004_8' AND c.atom_id2 = 'TR004_20')
+   OR (c.atom_id = 'TR004_20' AND c.atom_id2 = 'TR004_8');",SELECT T1.bond_type FROM bond AS T1 INNER JOIN connected AS T2 ON T1.bond_id = T2.bond_id WHERE T2.atom_id = 'TR004_8' AND T2.atom_id2 = 'TR004_20' OR T2.atom_id2 = 'TR004_8' AND T2.atom_id = 'TR004_20',What type of bond is there between the atoms TR004_8 and TR004_20?,type of bond refers to bond_type; between the atoms TR004_8 and TR004_20 refers to atom_id = 'TR004_8' AND atom_id2 = 'TR004_20' OR another way around,"[{""sql"": ""SELECT b.bond_type\nFROM connected c\nJOIN bond b ON c.bond_id = b.bond_id\nWHERE (c.atom_id = 'TR004_8' AND c.atom_id2 = 'TR004_20')\n   OR (c.atom_id = 'TR004_20' AND c.atom_id2 = 'TR004_8');"", ""error"": null}]"
+214,toxicology,simple,1,1,,0,2293,0,481.6,855,,0,769,,2,"[('+',), ('-',)]","[('+',), ('-',)]","SELECT DISTINCT m.label
+FROM molecule m
+WHERE m.molecule_id NOT IN (
+    SELECT a.molecule_id
+    FROM atom a
+    WHERE a.element = 'sn'
+);",SELECT DISTINCT T2.label FROM atom AS T1 INNER JOIN molecule AS T2 ON T1.molecule_id = T2.molecule_id WHERE T1.element != 'sn',What type of label is not on molecules with atoms with tin?,tin refers to element ! = 'sn'; label = '+' mean molecules are carcinogenic; label = '-' means molecules are non-carcinogenic,"[{""sql"": ""SELECT DISTINCT m.label\nFROM molecule m\nWHERE m.molecule_id NOT IN (\n    SELECT a.molecule_id\n    FROM atom a\n    WHERE a.element = 'sn'\n);"", ""error"": null}]"
+215,toxicology,challenging,0,0,wrong_result,0,6047,0,472.1,893,,0,837,,1,"[(119,)]","[(6, 92)]","SELECT COUNT(DISTINCT a.atom_id) AS atom_count
+FROM atom AS a
+WHERE a.element IN ('i','s')
+  AND a.molecule_id IN (
+      SELECT b.molecule_id
+      FROM bond AS b
+      WHERE b.bond_type = '-'
+  );","SELECT COUNT(DISTINCT CASE WHEN T1.element = 'i' THEN T1.atom_id ELSE NULL END) AS iodine_nums , COUNT(DISTINCT CASE WHEN T1.element = 's' THEN T1.atom_id ELSE NULL END) AS sulfur_nums FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id INNER JOIN bond AS T3 ON T2.bond_id = T3.bond_id WHERE T3.bond_type = '-'",How many atoms with iodine and with sulfur type elements are there in single bond molecules?,with iodine element refer to element = 'i'; with sulfur element refers to element = 's'; single type bond refers to bond_type = '-'; Should consider the distinct atoms when counting;,"[{""sql"": ""SELECT COUNT(DISTINCT a.atom_id) AS atom_count\nFROM atom AS a\nWHERE a.element IN ('i','s')\n  AND a.molecule_id IN (\n      SELECT b.molecule_id\n      FROM bond AS b\n      WHERE b.bond_type = '-'\n  );"", ""error"": null}]"
+220,toxicology,challenging,1,1,,0,5253,0,480.5,828,,0,157,,3,"[('c',), ('cl',), ('h',)]","[('c',), ('cl',), ('h',)]","SELECT DISTINCT a.element
+FROM atom AS a
+WHERE a.molecule_id = 'TR000'
+ORDER BY a.element ASC
+LIMIT 3;",SELECT DISTINCT T.element FROM atom AS T WHERE T.molecule_id = 'TR000' ORDER BY T.element LIMIT 3,Please list top three elements of the toxicology of the molecule TR000 in alphabetical order.,TR000 is the molecule id;,"[{""sql"": ""SELECT DISTINCT a.element\nFROM atom AS a\nWHERE a.molecule_id = 'TR000'\nORDER BY a.element ASC\nLIMIT 3;"", ""error"": null}]"
+222,toxicology,moderate,1,1,,0,1111,0,477.0,884,,0,731,,1,"[(-39,)]","[(-39,)]","SELECT 
+    SUM(CASE WHEN label = '+' THEN 1 ELSE 0 END) -
+    SUM(CASE WHEN label = '-' THEN 1 ELSE 0 END) AS difference
+FROM molecule;",SELECT COUNT(CASE WHEN T.label = '+' THEN T.molecule_id ELSE NULL END) - COUNT(CASE WHEN T.label = '-' THEN T.molecule_id ELSE NULL END) AS diff_car_notcar FROM molecule t,What is the difference between the number of molecules that are carcinogenic and those that are not?,"label = '+' means molecules are carcinogenic; label = '-' means molecules are non-carcinogenic; difference = SUBTRACT(SUM(label = '+'), SUM(label = '-'))","[{""sql"": ""SELECT \n    SUM(CASE WHEN label = '+' THEN 1 ELSE 0 END) -\n    SUM(CASE WHEN label = '-' THEN 1 ELSE 0 END) AS difference\nFROM molecule;"", ""error"": null}]"
+228,toxicology,moderate,1,1,,0,6711,0,473.2,897,,0,781,,1,"[(45.4545,)]","[(45.4545,)]","SELECT 
+    ROUND(
+        100.0 * SUM(CASE WHEN element = 'h' THEN 1 ELSE 0 END) / COUNT(*),
+        4
+    ) AS percent
+FROM atom
+WHERE molecule_id = 'TR206';","SELECT ROUND(CAST(COUNT(CASE WHEN T.element = 'h' THEN T.atom_id ELSE NULL END) AS REAL) * 100 / COUNT(T.atom_id),4) FROM atom AS T WHERE T.molecule_id = 'TR206'",How much of the hydrogen in molecule TR206 is accounted for? Please provide your answer as a percentage with four decimal places.,"hydrogen refers to element = 'h'; TR206 is the molecule id; percentage = DIVIDE(SUM(element = 'h'), COUNT(atom_id)) as percent where molecule_id = 'TR206'","[{""sql"": ""SELECT \n    ROUND(\n        100.0 * SUM(CASE WHEN element = 'h' THEN 1 ELSE 0 END) / COUNT(*),\n        4\n    ) AS percent\nFROM atom\nWHERE molecule_id = 'TR206';"", ""error"": null}]"
+240,toxicology,challenging,1,1,,0,4526,0,483.7,816,,0,648,,24,"[('s',), ('n',), ('o',)]","[('s',), ('n',), ('o',)]","SELECT element
+FROM atom
+WHERE molecule_id = 'TR004';",SELECT DISTINCT T.element FROM atom AS T WHERE T.molecule_id = 'TR004',"List all the elements of the toxicology of the molecule ""TR004"".",TR004 is the molecule id;,"[{""sql"": ""SELECT element\nFROM atom\nWHERE molecule_id = 'TR004';"", ""error"": null}]"
+242,toxicology,moderate,1,1,,0,5131,0,481.5,861,,0,214,,75,"[('TR001',), ('TR006',), ('TR019',)]","[('TR001',), ('TR006',), ('TR019',)]","SELECT DISTINCT a.molecule_id
+FROM atom AS a
+JOIN molecule AS m ON a.molecule_id = m.molecule_id
+WHERE SUBSTR(a.atom_id, 7, 2) BETWEEN '21' AND '25'
+  AND m.label = '+';","SELECT DISTINCT T2.molecule_id FROM atom AS T1 INNER JOIN molecule AS T2 ON T1.molecule_id = T2.molecule_id WHERE SUBSTR(T1.atom_id, -2) BETWEEN '21' AND '25' AND T2.label = '+'","Among all the atoms from 21 to 25, list all the molecules that are carcinogenic.","atoms from 21 to 25 refers to SUBSTR(atom_id, 7, 2) between '21' and '25'; label = '+' mean molecules are carcinogenic","[{""sql"": ""SELECT DISTINCT a.molecule_id\nFROM atom AS a\nJOIN molecule AS m ON a.molecule_id = m.molecule_id\nWHERE SUBSTR(a.atom_id, 7, 2) BETWEEN '21' AND '25'\n  AND m.label = '+';"", ""error"": null}]"
+250,toxicology,moderate,0,0,wrong_result,0,1714,0,345.1,844,,0,209,,1,"[('TR430', 26)]","[('TR430',)]","SELECT
+    m.molecule_id,
+    COUNT(b.bond_id) AS double_bond_count
+FROM molecule m
+JOIN bond b ON b.molecule_id = m.molecule_id
+WHERE m.label = '+'
+  AND b.bond_type = '='
+GROUP BY m.molecule_id
+ORDER BY double_bond_count DESC
+LIMIT 1;","SELECT T.molecule_id FROM ( SELECT T3.molecule_id, COUNT(T1.bond_type) FROM bond AS T1 INNER JOIN molecule AS T3 ON T1.molecule_id = T3.molecule_id WHERE T3.label = '+' AND T1.bond_type = '=' GROUP BY T3.molecule_id ORDER BY COUNT(T1.bond_type) DESC LIMIT 1 ) AS T","Of all the carcinogenic molecules, which one has the most double bonds?",label = '+' mean molecules are carcinogenic; double bond refers to bond_type = ' = ';,"[{""sql"": ""SELECT\n    m.molecule_id,\n    COUNT(b.bond_id) AS double_bond_count\nFROM molecule m\nJOIN bond b ON b.molecule_id = m.molecule_id\nWHERE m.label = '+'\n  AND b.bond_type = '='\nGROUP BY m.molecule_id\nORDER BY double_bond_count DESC\nLIMIT 1;"", ""error"": null}]"
+252,toxicology,simple,0,0,wrong_result,0,944,0,478.0,838,,0,720,,4,"[('TR151_15', 'h', 'TR151'), ('TR151_16', 'h', 'TR151'), ('TR151_17', 'h', 'TR151')]","[('TR151_14', 'TR151_15'), ('TR151_14', 'TR151_16'), ('TR151_14', 'TR151_17')]","SELECT a2.atom_id,
+       a2.element,
+       a2.molecule_id
+FROM atom AS a
+JOIN connected AS c ON c.atom_id = a.atom_id
+JOIN atom AS a2 ON a2.atom_id = c.atom_id2
+WHERE a.element = 'pb';","SELECT T2.atom_id, T2.atom_id2 FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id WHERE T1.element = 'pb'",What are the atoms that can bond with the atom that has the element lead?,atom that has the element lead refers to atom_id where element = 'pb',"[{""sql"": ""SELECT a2.atom_id,\n       a2.element,\n       a2.molecule_id\nFROM atom AS a\nJOIN connected AS c ON c.atom_id = a.atom_id\nJOIN atom AS a2 ON a2.atom_id = c.atom_id2\nWHERE a.element = 'pb';"", ""error"": null}]"
+253,toxicology,challenging,1,1,,0,5317,0,481.7,812,,0,211,,4,"[('n',), ('c',), ('y',)]","[('n',), ('c',), ('y',)]","SELECT DISTINCT a.element
+FROM atom AS a
+JOIN connected AS c ON a.atom_id = c.atom_id
+JOIN bond AS b ON c.bond_id = b.bond_id
+WHERE b.bond_type = '#';",SELECT DISTINCT T3.element FROM bond AS T1 INNER JOIN connected AS T2 ON T1.bond_id = T2.bond_id INNER JOIN atom AS T3 ON T2.atom_id = T3.atom_id WHERE T1.bond_type = '#',List the elements of all the triple bonds.,triple bond refers to bond_type = '#';,"[{""sql"": ""SELECT DISTINCT a.element\nFROM atom AS a\nJOIN connected AS c ON a.atom_id = c.atom_id\nJOIN bond AS b ON c.bond_id = b.bond_id\nWHERE b.bond_type = '#';"", ""error"": null}]"
+258,toxicology,moderate,1,1,,0,2497,0,476.6,864,,0,868,,1,"[('-',)]","[('-',)]","SELECT DISTINCT b.bond_type
+FROM atom a
+JOIN connected c ON a.atom_id = c.atom_id OR a.atom_id = c.atom_id2
+JOIN bond b ON c.bond_id = b.bond_id
+WHERE a.element = 'sn';",SELECT DISTINCT T3.bond_type FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id INNER JOIN bond AS T3 ON T3.bond_id = T2.bond_id WHERE T1.element = 'sn',What are the bond type for atoms with element Tin?,element Tin refers to element = 'sn'; double bond refers to bond_type = ' = '; single bond refers to bond_type = '-'; triple bond refers to bond_type = '#',"[{""sql"": ""SELECT DISTINCT b.bond_type\nFROM atom a\nJOIN connected c ON a.atom_id = c.atom_id OR a.atom_id = c.atom_id2\nJOIN bond b ON c.bond_id = b.bond_id\nWHERE a.element = 'sn';"", ""error"": null}]"
+277,toxicology,challenging,1,1,,0,6498,0,482.8,817,,0,173,,2,"[('cl',), ('c',)]","[('cl',), ('c',)]","SELECT DISTINCT a.element
+FROM connected c
+JOIN atom a ON a.atom_id = c.atom_id
+WHERE c.bond_id = 'TR000_1_2';",SELECT T1.element FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id WHERE T2.bond_id = 'TR000_1_2',What are the toxicology elements associated with bond ID TR000_1_2?,TR000_1_2 is the bond id;,"[{""sql"": ""SELECT DISTINCT a.element\nFROM connected c\nJOIN atom a ON a.atom_id = c.atom_id\nWHERE c.bond_id = 'TR000_1_2';"", ""error"": null}]"
+281,toxicology,challenging,0,0,wrong_result,0,888,0,450.8,860,,0,255,,9,"[('br', 6), ('c', 145), ('cl', 9)]","[('cl',), ('c',), ('br',)]","SELECT
+    a.element,
+    COUNT(*) AS tally
+FROM atom AS a
+JOIN molecule AS m
+    ON a.molecule_id = m.molecule_id
+WHERE m.label = '+'
+  AND substr(a.atom_id, 7, 1) = '4'
+GROUP BY a.element;","SELECT DISTINCT T1.element FROM atom AS T1 INNER JOIN molecule AS T2 ON T1.molecule_id = T2.molecule_id WHERE T2.label = '+' AND SUBSTR(T1.atom_id, -1) = '4' AND LENGTH(T1.atom_id) = 7",Tally the toxicology element of the 4th atom of each molecule that was carcinogenic.,"label = '+' means molecules are carcinogenic; 4th atom of each molecule refers to substr(atom_id, 7, 1) = '4'; ","[{""sql"": ""SELECT\n    a.element,\n    COUNT(*) AS tally\nFROM atom AS a\nJOIN molecule AS m\n    ON a.molecule_id = m.molecule_id\nWHERE m.label = '+'\n  AND substr(a.atom_id, 7, 1) = '4'\nGROUP BY a.element;"", ""error"": null}]"
+288,toxicology,simple,1,1,,0,3555,0,308.2,827,,0,149,,1,"[('+',)]","[('+',)]","SELECT m.label AS carcinogenic_label
+FROM atom a
+JOIN molecule m ON a.molecule_id = m.molecule_id
+WHERE a.atom_id = 'TR001_1';",SELECT T2.label AS flag_carcinogenic FROM atom AS T1 INNER JOIN molecule AS T2 ON T1.molecule_id = T2.molecule_id WHERE T1.atom_id = 'TR001_1',Identify whether the molecule that contains atom TR001_1 is carcinogenic.,label = '+' mean molecules are carcinogenic;,"[{""sql"": ""SELECT m.label AS carcinogenic_label\nFROM atom a\nJOIN molecule m ON a.molecule_id = m.molecule_id\nWHERE a.atom_id = 'TR001_1';"", ""error"": null}]"
+293,toxicology,simple,1,1,,0,1014,0,475.9,828,,0,667,,1,"[(3692,)]","[(3692,)]","SELECT COUNT(*) AS atom_count
+FROM atom
+JOIN molecule USING (molecule_id)
+WHERE molecule.label = '+';",SELECT COUNT(T1.atom_id) FROM atom AS T1 INNER JOIN molecule AS T2 ON T1.molecule_id = T2.molecule_id WHERE T2.label = '+',How many atoms belong to the molecule labeled with carcinogenic compounds?,label = '+' mean molecules are carcinogenic;,"[{""sql"": ""SELECT COUNT(*) AS atom_count\nFROM atom\nJOIN molecule USING (molecule_id)\nWHERE molecule.label = '+';"", ""error"": null}]"
+302,toxicology,challenging,1,1,,0,4442,0,481.5,986,,0,327,,2,"[('c',), ('c',)]","[('c',)]","SELECT a.element
+FROM atom AS a
+JOIN connected AS c
+  ON a.atom_id = c.atom_id
+WHERE c.bond_id = 'TR001_2_4';",SELECT DISTINCT T1.element FROM atom AS T1 INNER JOIN connected AS T2 ON T1.atom_id = T2.atom_id WHERE T2.bond_id = 'TR001_2_4',Name the elements that comprise the atoms of bond TR001_2_4.,"element = 'cl' means Chlorine; element = 'c' means Carbon; element = 'h' means Hydrogen; element = 'o' means Oxygen, element = 's' means Sulfur; element = 'n' means Nitrogen, element = 'p' means Phosphorus, element = 'na' means Sodium, element = 'br' means Bromine, element = 'f' means Fluorine; element = 'i' means Iodine; element = 'sn' means Tin; element = 'pb' means Lead; element = 'te' means Tellurium; element = 'ca' means Calcium","[{""sql"": ""SELECT a.element\nFROM atom AS a\nJOIN connected AS c\n  ON a.atom_id = c.atom_id\nWHERE c.bond_id = 'TR001_2_4';"", ""error"": null}]"
