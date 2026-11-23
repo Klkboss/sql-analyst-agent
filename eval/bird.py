@@ -31,7 +31,8 @@ PER_DIFFICULTY = {"simple": 80, "moderate": 80, "challenging": 40}
 MODELS = ["qwen2.5-coder:7b", "qwen3:4b-instruct-2507-q4_K_M"]
 
 # Every config sets every switch explicitly, so values in .env can't leak into the benchmark.
-_BASE = dict(schema_detail="full", max_retries=3, zero_agg_suspicious=False, strict_retry=False)
+_BASE = dict(schema_detail="full", max_retries=3, zero_agg_suspicious=False, strict_retry=False,
+             check_shape=False)
 CONFIGS = {
     "a_names":  dict(_BASE, schema_detail="names", max_retries=0),  # baseline: names only
     "b_schema": dict(_BASE, max_retries=0),                          # + types, keys, sample rows
@@ -39,9 +40,9 @@ CONFIGS = {
     "c_zero":   dict(_BASE, zero_agg_suspicious=True),               # + fix 1
     "c_strict": dict(_BASE, strict_retry=True),                      # + fix 2
     "c_both":   dict(_BASE, zero_agg_suspicious=True, strict_retry=True),
-    # The shipped defaults. Same switches as c_zero, but run on the final code
-    # (keyword quoting in schema.py), so the README headline matches what ships.
-    "final":    dict(_BASE, zero_agg_suspicious=True),
+    # The shipped defaults, run on the final code (keyword quoting, join paths in the
+    # schema, SQL-shape check), so the README headline matches what ships.
+    "final":    dict(_BASE, zero_agg_suspicious=True, check_shape=True),
 }
 # A run is a config name, plus "+ev" to append BIRD's human-written evidence hint.
 DEFAULT_RUNS = ["a_names", "b_schema", "c_retry", "c_zero", "c_strict", "c_both",

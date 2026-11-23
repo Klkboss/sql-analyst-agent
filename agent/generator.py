@@ -10,7 +10,10 @@ SYSTEM_PROMPT = """You are an expert SQLite analyst.
 Write ONE SQLite SELECT query that answers the user's question using the schema below.
 Rules:
 - Use only tables and columns that exist in the schema.
-- Join tables using the REFERENCES (foreign key) columns shown.
+- Join tables using the REFERENCES (foreign key) columns and the join paths listed after the
+  tables. Never put a subquery inside a JOIN's ON condition: join through the bridge table.
+- If the question ranks or filters by a computed value (e.g. "top 10 by average score"),
+  return that value as a column too, unless the question lists exactly which columns to show.
 - Match text values exactly as they appear in the sample rows.
 - Names shown in double quotes contain spaces or symbols: keep the quotes in your SQL.
 - Never modify data: SELECT (or WITH ... SELECT) only.
@@ -72,8 +75,9 @@ def extract_sql(llm_reply: str) -> str:
 
 
 def estimate_tokens(messages: list[dict]) -> int:
-    # shortcut: chars/2.4 measured on BIRD schemas with qwen2.5's tokenizer (2.4-2.8 chars/token);
-    # deliberately pessimistic. Upgrade to a real tokenizer if estimates start to matter.
+    # shortcut: chars/2.4, measured on BIRD schemas with qwen2.5's tokenizer (2.4-2.8 chars/token).
+    # qwen3 on Olist is ~2.3, so this runs ~4% low there; the 1024-token reserve absorbs it.
+    # Upgrade to the model's real tokenizer if estimates start to matter.
     return int(sum(len(m["content"]) for m in messages) / 2.4)
 
 

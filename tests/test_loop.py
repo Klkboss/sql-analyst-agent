@@ -87,8 +87,17 @@ def test_small_schema_skips_table_selection(db, fake_llm):
     assert r.selected_tables is None and len(calls) == 1
 
 
+def _size(db, question, tables=None, history=()):
+    """Estimated prompt tokens, so tests pick budgets from real sizes, not magic numbers."""
+    from agent.generator import estimate_tokens, initial_messages
+    from agent.schema import get_schema
+    return estimate_tokens(initial_messages(get_schema(db, "full", tables), question, None, history))
+
+
 def test_big_schema_triggers_table_selection(db, fake_llm, monkeypatch):
-    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 350)  # selected fits (~280), full (~430) does not
+    small, full = _size(db, "artist names?", ("artist",)), _size(db, "artist names?")
+    assert small < full
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + (small + full) // 2)
     calls = fake_llm("artist", "SELECT name FROM artist")
     r = loop.run_agent("artist names?", db)
     assert r.selected_tables == ["artist"] and not r.ctx_overflow
@@ -120,10 +129,64 @@ def test_history_goes_in_as_earlier_turns_last_three_only(db, fake_llm):
 
 
 def test_tight_budget_keeps_last_turn_and_tells_table_selection(db, fake_llm, monkeypatch):
-    # Room for the selected schema + one turn, not for the full schema or three turns.
-    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 370)
+    # Room for the selected schema + one turn, not for the full schema even with one turn.
+    q, last = "and sorted by name?", HISTORY[-1:]
+    fits, too_big = _size(db, q, ("artist",), last), _size(db, q, None, last)
+    assert fits < too_big
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + fits)
     calls = fake_llm("artist", "SELECT name FROM artist")
     r = loop.run_agent("and sorted by name?", db, history=HISTORY)
     assert r.selected_tables == ["artist"] and r.history_used == 1
     assert "question 5" in calls[0][0]["content"]       # selection saw the previous question
     assert calls[1][1]["content"] == "question 5"       # and the SQL call kept that turn
+
+
+# --- SQL-shape self-check -----------------------------------------------------------
+
+HIDDEN = "SELECT a.name FROM artist a JOIN album b ON b.artist_id = a.id GROUP BY a.name ORDER BY COUNT(*) DESC"
+SHOWN = "SELECT a.name, COUNT(*) AS albums FROM artist a JOIN album b ON b.artist_id = a.id GROUP BY a.name ORDER BY albums DESC"
+
+
+def test_shape_check_retries_hidden_ranking_metric(db, fake_llm):
+    calls = fake_llm(HIDDEN, SHOWN)
+    r = loop.run_agent("artists with most albums", db, check_shape=True)
+    assert "ranks rows by COUNT(*)" in r.attempts[0].error
+    assert r.ok and r.result.columns == ["name", "albums"]
+    assert len(calls) == 2
+
+
+def test_shape_check_off_accepts_it(db, fake_llm):
+    fake_llm(HIDDEN)
+    assert loop.run_agent("artists with most albums", db, check_shape=False).ok
+
+
+def test_shape_check_accepts_confirmed_resubmission(db, fake_llm):
+    fake_llm(HIDDEN, HIDDEN)  # "the question asked for names only" -> same SQL = confirmed
+    r = loop.run_agent("names of artists ordered by album count", db, check_shape=True)
+    assert r.ok and len(r.attempts) == 2
+
+
+def test_keyword_table_alias_is_repaired_before_running(db, fake_llm):
+    fake_llm("SELECT or.name FROM artist or JOIN album al ON al.artist_id = or.id")
+    r = loop.run_agent("names", db)
+    assert r.ok and len(r.attempts) == 1
+    assert r.sql == "SELECT or_.name FROM artist or_ JOIN album al ON al.artist_id = or_.id"
+
+
+def test_other_keyword_errors_explain_themselves(db, fake_llm):
+    fake_llm("SELECT name AS order FROM artist", "SELECT name AS artist_name FROM artist")
+    r = loop.run_agent("names", db)
+    assert '"order" is a reserved SQL keyword' in r.attempts[0].error
+    assert r.ok
+
+
+def test_other_syntax_errors_get_no_keyword_hint(db, fake_llm):
+    fake_llm("SELECT name FROM artist WHERE", "SELECT name FROM artist")
+    assert "reserved" not in loop.run_agent("names", db).attempts[0].error
+
+
+def test_repeated_failing_sql_is_called_out(db, fake_llm):
+    calls = fake_llm("SELECT nme FROM artist", "SELECT nme FROM artist", "SELECT name FROM artist")
+    r = loop.run_agent("names", db)
+    assert "exact query before" not in r.attempts[0].error
+    assert "exact query before" in r.attempts[1].error and r.ok

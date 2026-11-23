@@ -14,6 +14,7 @@ Before the first attempt: if the full schema would overflow the model's context 
 an extra LLM call picks the relevant tables, and only those are shown (logged, never silent).
 """
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -21,7 +22,9 @@ from pathlib import Path
 
 from agent import config, generator, llm
 from agent.sandbox import GuardError, QueryResult, run_query
-from agent.schema import get_schema, list_tables
+from agent.schema import _needs_quotes as needs_quotes
+from agent.schema import bridge_tables, get_schema, list_tables
+from agent.sqlcheck import fix_keyword_aliases, shape_problem
 
 log = logging.getLogger(__name__)
 
@@ -74,6 +77,16 @@ def _suspicious(r: QueryResult, zero_agg: bool = False) -> str | None:
     return None
 
 
+def _keyword_hint(error: str) -> str:
+    # Olist: the model aliased order_reviews as "or" and retried the same SQL 3 times,
+    # because 'near "or": syntax error' doesn't say why. Name the cause when it's a keyword.
+    m = re.search(r'near "(\w+)": syntax error', error)
+    if m and needs_quotes(m.group(1)):
+        return (f' "{m.group(1)}" is a reserved SQL keyword: if you used it as a table alias '
+                f"or name, use a different alias (or double-quote the name).")
+    return ""
+
+
 def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) -> list[dict]:
     """Initial messages, shrunk to fit the context window in three steps (logged, never silent):
     1. drop older history turns, keeping the last one (a follow-up needs it most);
@@ -100,7 +113,9 @@ def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) 
         start = time.perf_counter()
         reply = llm.chat(generator.table_select_messages(get_schema(db_path, "names"), ask, evidence))
         out.select_ms = (time.perf_counter() - start) * 1000
-        out.selected_tables = generator.parse_tables(reply.text, list_tables(db_path)) or None
+        picked = generator.parse_tables(reply.text, list_tables(db_path))
+        # Add bridge tables, so e.g. order_reviews + products also brings order_items.
+        out.selected_tables = bridge_tables(db_path, picked) if picked else None
         log.info("selected tables: %s", out.selected_tables or "none recognised - keeping all")
         if out.selected_tables:
             schema = get_schema(db_path, detail, tuple(out.selected_tables))
@@ -121,29 +136,41 @@ def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) 
 def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_RETRIES, *,
               evidence: str | None = None, schema_detail: str = "full",
               zero_agg_suspicious: bool | None = None, strict_retry: bool | None = None,
-              history: list[tuple[str, str]] | None = None) -> AgentResult:
+              history: list[tuple[str, str]] | None = None,
+              check_shape: bool | None = None) -> AgentResult:
     """`history`: earlier (question, SQL) turns of this conversation, oldest first."""
     # None = use the .env switch; the benchmark passes explicit values.
     zero_agg = config.SUSPECT_ZERO_AGG if zero_agg_suspicious is None else zero_agg_suspicious
     strict = config.STRICT_RETRY if strict_retry is None else strict_retry
+    shape = config.CHECK_SQL_SHAPE if check_shape is None else check_shape
 
     out = AgentResult(question)
     recent = list(history or [])[-MAX_HISTORY_TURNS:]
     messages = _fit_schema(db_path, question, evidence, schema_detail, recent, out)
     warned_sql = None  # SQL we flagged as suspicious last round
+    failed = set()     # SQL that already errored: resending it is a wasted retry at temperature 0
 
     for n in range(1, max_retries + 2):  # first try + retries
         start = time.perf_counter()
         reply = llm.chat(messages)
-        sql = generator.extract_sql(reply.text)
+        sql, renamed = fix_keyword_aliases(generator.extract_sql(reply.text))
+        if renamed:
+            log.info("renamed keyword table aliases: %s", ", ".join(renamed))
         try:
             result = run_query(db_path, sql)
             out.result, out.sql = result, sql
             # Same SQL resubmitted after a warning = model confirms the empty/zero answer.
-            problem = None if sql == warned_sql else _suspicious(result, zero_agg)
+            problem = None if sql == warned_sql else (
+                _suspicious(result, zero_agg) or (shape_problem(sql, question) if shape else None))
             warned_sql = sql if problem else None
         except (GuardError, TimeoutError, sqlite3.Error) as e:
-            problem = f"The query failed with error: {e}"
+            problem = f"The query failed with error: {e}" + _keyword_hint(str(e))
+            if renamed:
+                problem += (f" Note: your table alias {', '.join(renamed)} is an SQL keyword and was "
+                            "renamed for this run; use short aliases that are not keywords (r, oi, p).")
+            if sql in failed:
+                problem += " You sent this exact query before and it failed the same way: rewrite it differently."
+            failed.add(sql)
             warned_sql = None
         latency = (time.perf_counter() - start) * 1000
 

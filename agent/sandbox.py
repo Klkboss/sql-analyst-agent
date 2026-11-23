@@ -42,12 +42,16 @@ _FORBIDDEN = re.compile(
 )
 
 
+def strip_literals(sql: str) -> str:
+    """SQL with comments removed and string literals emptied, for keyword/shape checks."""
+    return _TOKENS.sub(lambda m: " " if m.group().startswith(("--", "/*")) else "''", sql)
+
+
 def check_sql(sql: str) -> None:
     """Raise GuardError unless `sql` is a single SELECT (or WITH ... SELECT) statement."""
     # Blank out strings and comments first, so "SELECT 'DROP'" passes and
     # "/* hi */ DELETE ..." doesn't hide its first keyword.
-    code = _TOKENS.sub(lambda m: " " if m.group().startswith(("--", "/*")) else "''", sql)
-    code = code.strip().rstrip(";").strip()
+    code = strip_literals(sql).strip().rstrip(";").strip()
     if not code:
         raise GuardError("Empty query.")
     if ";" in code:

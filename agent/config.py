@@ -41,3 +41,6 @@ CONTEXT_LIMIT = OLLAMA_NUM_CTX if LLM_PROVIDER == "ollama" else 32_000
 SUSPECT_ZERO_AGG = _env("SUSPECT_ZERO_AGG", "1") == "1"  # a single 0/NULL row counts as suspicious
 # Strict retry prompt: off by default - tested, no gain (fixed 0, broke 1).
 STRICT_RETRY = _env("STRICT_RETRY", "0") == "1"
+# SQL-shape self-check (agent/sqlcheck.py): a scalar subquery in a JOIN's ON condition, or
+# ranking by a computed value without returning it, triggers a retry. Found on Olist.
+CHECK_SQL_SHAPE = _env("CHECK_SQL_SHAPE", "1") == "1"
