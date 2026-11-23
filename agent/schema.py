@@ -52,7 +52,8 @@ def get_schema(db_path: str | Path, detail: str = "full", tables: tuple[str, ...
                 parts.append(f"Table {_show(t)}: " + ", ".join(_show(c) for c, _, _ in cols))
                 continue
             # pragma_*() table functions accept the table name as a bound parameter.
-            fks = {frm: f"{_show(ref)}.{_show(to)}" for frm, ref, to in conn.execute(
+            # `to` is NULL for "REFERENCES t" with no column, which means t's primary key.
+            fks = {frm: f"{_show(ref)}.{_show(to)}" if to else _show(ref) for frm, ref, to in conn.execute(
                 'SELECT "from", "table", "to" FROM pragma_foreign_key_list(?)', (t,))}
             lines = [f"Table {_show(t)}:"]
             for col, ctype, pk in cols:

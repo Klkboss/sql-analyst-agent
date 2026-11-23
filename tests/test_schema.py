@@ -9,7 +9,9 @@ def test_lists_tables_columns_and_types(db):
 
 
 def test_shows_foreign_keys(db):
-    assert "artist_id INTEGER REFERENCES artist.id" in get_schema(db)
+    s = get_schema(db)
+    assert "artist_id INTEGER REFERENCES artist.id" in s
+    assert "album_id INTEGER REFERENCES album\n" in s  # FK that names no column
 
 
 def test_at_most_three_sample_rows(db):
@@ -30,7 +32,7 @@ def test_table_subset(db):
 
 
 def test_odd_names_are_quoted(db):
-    assert 'Table "order items": "item id", "unit price"' in get_schema(db, "names")
+    assert 'Table "order items": "item id", "unit price", album_id' in get_schema(db, "names")
 
 
 def test_long_values_are_shortened(db):
