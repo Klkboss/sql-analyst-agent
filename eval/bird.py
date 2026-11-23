@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent import config
+from agent import config, llm
 from agent.loop import run_agent
 from agent.sandbox import _execute
 from eval.metrics import ex_match, failure_reason, lenient_match
@@ -54,7 +54,7 @@ DEFAULT_RUNS = ["a_names", "b_schema", "c_retry", "c_zero", "c_strict", "c_both"
 
 FIELDS = ["question_id", "db_id", "difficulty", "ex", "ex_lenient", "reason", "retries",
           "latency_ms", "select_ms", "tokens_per_sec", "prompt_tokens_est", "selected_tables",
-          "ctx_overflow", "error", "pred_rows", "pred_preview", "gold_preview",
+          "ctx_overflow", "tokens", "error", "pred_rows", "pred_preview", "gold_preview",
           "pred_sql", "gold_sql", "question", "evidence", "attempts"]
 
 # Benchmark limits: more generous than the CLI so slow-but-correct SQL on the big
@@ -97,14 +97,21 @@ def _preview(rows) -> str:
     return repr(rows[:3])[:200] if rows is not None else ""
 
 
+def _billed() -> int:
+    # Groq tokens counted against the free tier so far (cached prompt tokens don't count).
+    return llm.usage["prompt"] + llm.usage["completion"] - llm.usage["cached"]
+
+
 def run_one(q: dict, run: str, gold: list) -> dict:
     cfg_name, _, ev = run.partition("+")
     row = {"question_id": q["question_id"], "db_id": q["db_id"], "difficulty": q["difficulty"],
            "gold_sql": q["SQL"], "question": q["question"], "evidence": q["evidence"] if ev else "",
            "gold_preview": _preview(gold)}
-    start = time.perf_counter()
+    start, used = time.perf_counter(), _billed()
     try:
         r = run_agent(q["question"], db_path(q), evidence=q["evidence"] if ev else None, **CONFIGS[cfg_name])
+    except llm.RateLimited:
+        raise  # main() waits it out and redoes this question
     except Exception as e:  # LLM/HTTP failure (e.g. Ollama stopped): record it; resume retries it
         return {**row, "ex": 0, "ex_lenient": 0, "reason": "agent_error", "error": str(e)[:300],
                 "latency_ms": round((time.perf_counter() - start) * 1000)}
@@ -121,6 +128,7 @@ def run_one(q: dict, run: str, gold: list) -> dict:
             "prompt_tokens_est": r.prompt_tokens_est,
             "selected_tables": ",".join(r.selected_tables or []),
             "ctx_overflow": int(r.ctx_overflow),
+            "tokens": (_billed() - used) or "",
             "error": r.attempts[-1].error or "",
             "pred_rows": len(pred) if pred is not None else "",
             "pred_preview": _preview(pred),
@@ -132,6 +140,9 @@ def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--models", nargs="+", default=MODELS)
+    p.add_argument("--provider", choices=["ollama", "groq"], default="ollama",
+                   help="groq: --models are Groq model ids, e.g. openai/gpt-oss-120b")
+    p.add_argument("--first", type=int, help="only the first N questions, 40/40/20 by difficulty")
     p.add_argument("--runs", nargs="+", default=DEFAULT_RUNS)
     p.add_argument("--limit", type=int, help="only N questions, spread across databases (pilot)")
     args = p.parse_args()
@@ -140,13 +151,19 @@ def main() -> None:
             p.error(f"unknown run {run!r}; configs: {', '.join(CONFIGS)} (optionally +ev)")
     logging.basicConfig(level=logging.WARNING, format="  [%(name)s] %(message)s")
 
-    config.LLM_PROVIDER = "ollama"
+    # The same 4096-token budget on Groq too, so it sees exactly the prompts the 4B saw.
+    config.LLM_PROVIDER = args.provider
     config.OLLAMA_NUM_CTX = config.CONTEXT_LIMIT = BENCH_NUM_CTX
     config.QUERY_TIMEOUT_S, config.MAX_ROWS = PRED_TIMEOUT_S, MAX_ROWS
 
     sample = load_sample()
     if args.limit:
         sample = sample[:: max(1, len(sample) // args.limit)][: args.limit]
+    if args.first:  # the Groq check: the lowest question ids of each difficulty in the sample
+        n = sum(PER_DIFFICULTY.values())
+        keep = {d: sorted(q["question_id"] for q in sample if q["difficulty"] == d)[: args.first * k // n]
+                for d, k in PER_DIFFICULTY.items()}
+        sample = [q for q in sample if q["question_id"] in keep[q["difficulty"]]]
 
     print(f"Gold results for {len(sample)} questions ...")
     gold = {}
@@ -158,19 +175,30 @@ def main() -> None:
     sample = [q for q in sample if q["question_id"] in gold]
 
     for model in args.models:
-        config.OLLAMA_MODEL = model
+        config.OLLAMA_MODEL = config.GROQ_MODEL = model
         for run in args.runs:
             out = RESULTS / model.replace(":", "_").replace("/", "_") / f"{run}.csv"
             out.parent.mkdir(parents=True, exist_ok=True)
             todo = [q for q in sample if q["question_id"] not in done_ids(out)]
             print(f"\n=== {model} | {run} | {len(sample) - len(todo)} done, {len(todo)} to go ===")
             new_file = not out.exists()
+            if new_file:
+                fields = FIELDS
+            else:  # older CSVs predate some columns: keep appending in their own layout
+                with open(out, newline="", encoding="utf-8") as f:
+                    fields = next(csv.reader(f))
             with open(out, "a", newline="", encoding="utf-8") as f:
-                w = csv.DictWriter(f, fieldnames=FIELDS)
+                w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
                 if new_file:
                     w.writeheader()
                 for i, q in enumerate(todo, 1):
-                    row = run_one(q, run, gold[q["question_id"]])
+                    while True:
+                        try:
+                            row = run_one(q, run, gold[q["question_id"]])
+                            break
+                        except llm.RateLimited as e:  # daily cap: sleep until it resets, then go on
+                            print(f"  {e}; sleeping until then", flush=True)
+                            time.sleep(e.wait_s + 30)
                     w.writerow(row)
                     f.flush()  # every finished question is on disk, so Ctrl+C loses at most one
                     print(f"  {i:3}/{len(todo)} q{q['question_id']:<5} {q['difficulty']:11} "

@@ -16,6 +16,19 @@ from agent import config
 log = logging.getLogger(__name__)
 
 
+# Tokens used since start, summed over calls (Groq only). The benchmark reads the
+# difference per question to measure cost against the free-tier daily token limit.
+usage = {"prompt": 0, "completion": 0, "cached": 0}
+
+
+class RateLimited(requests.HTTPError):
+    """Groq said to wait longer than is worth blocking for (e.g. the daily token cap)."""
+
+    def __init__(self, wait_s: float):
+        super().__init__(f"Groq rate limit reached: try again in {wait_s / 60:.0f} min")
+        self.wait_s = wait_s
+
+
 @dataclass
 class LLMResponse:
     text: str
@@ -63,15 +76,33 @@ def _call_ollama(messages: list[dict]) -> tuple[str, float | None]:
 def _call_groq(messages: list[dict]) -> tuple[str, float | None]:
     if not config.GROQ_API_KEY:
         raise RuntimeError("LLM_PROVIDER=groq but GROQ_API_KEY is empty in .env")
-    resp = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",  # OpenAI-compatible endpoint
-        headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
-        json={"model": config.GROQ_MODEL, "messages": messages, "temperature": 0},
-        timeout=60,
-    )
+    body = {"model": config.GROQ_MODEL, "messages": messages, "temperature": 0}
+    if config.GROQ_MODEL.startswith("openai/gpt-oss"):
+        # Only the answer comes back (no reasoning text to parse or log); effort caps its length.
+        body["include_reasoning"] = False
+        if config.GROQ_REASONING_EFFORT != "default":
+            body["reasoning_effort"] = config.GROQ_REASONING_EFFORT
+    while True:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",  # OpenAI-compatible endpoint
+            headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
+            json=body,
+            timeout=60,
+        )
+        if resp.status_code != 429:
+            break
+        # Per-minute limits clear in seconds: wait and retry. A long wait means a daily cap.
+        wait = float(resp.headers.get("retry-after", 60))
+        if wait > 60:
+            raise RateLimited(wait)
+        log.info("Groq rate limit: waiting %.0f s", wait)
+        time.sleep(wait)
     resp.raise_for_status()
     data = resp.json()
-    usage = data.get("usage", {})
+    u = data.get("usage", {})
+    usage["prompt"] += u.get("prompt_tokens", 0)
+    usage["completion"] += u.get("completion_tokens", 0)  # includes hidden reasoning tokens
+    usage["cached"] += (u.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
     # Groq adds completion_time (seconds) to the standard OpenAI usage block
-    tps = usage["completion_tokens"] / usage["completion_time"] if usage.get("completion_time") else None
+    tps = u["completion_tokens"] / u["completion_time"] if u.get("completion_time") else None
     return data["choices"][0]["message"]["content"], tps

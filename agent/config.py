@@ -27,7 +27,10 @@ OLLAMA_NUM_GPU = int(_env("OLLAMA_NUM_GPU")) if _env("OLLAMA_NUM_GPU") else None
 OLLAMA_KEEP_ALIVE = _env("OLLAMA_KEEP_ALIVE", "10m")
 
 GROQ_API_KEY = _env("GROQ_API_KEY")
-GROQ_MODEL = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = _env("GROQ_MODEL", "openai/gpt-oss-120b")
+# gpt-oss models think before answering; those hidden tokens count against Groq's free-tier
+# token limits. low / medium / high, or "default" to send nothing (Groq's default is medium).
+GROQ_REASONING_EFFORT = _env("GROQ_REASONING_EFFORT", "low")
 
 # Sandbox and agent-loop limits (read at call time, so the benchmark can raise them)
 QUERY_TIMEOUT_S = 10

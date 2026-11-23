@@ -17,7 +17,7 @@ data/*.sqlite
 data/*.db
 data/*.part
 data/bird/
-eval/results/run.log
+eval/results/*.log
 
 # Raw Olist download from Kaggle (CC BY-NC-SA 4.0); load with data/download_olist.py
 archive/
