@@ -49,6 +49,15 @@ def test_question_then_follow_up(fake_llm):
     assert "SELECT Name FROM Genre" in sql_call[2]["content"]
 
 
+def test_example_button_asks_the_question(fake_llm):
+    calls = fake_llm("```sql\nSELECT COUNT(*) FROM Album\n```", "AC/DC has 2 albums.")
+    at = AppTest.from_file(str(APP), default_timeout=30).run()
+    at.button(key="example-4").click().run()
+    assert not at.exception
+    assert calls[0][-1]["content"] == "How many albums does the artist AC/DC have?"
+    assert not [b for b in at.button if b.key and b.key.startswith("example-")]  # hidden once chatting
+
+
 def test_data_notes_reach_the_prompt(fake_llm):
     calls = fake_llm("```sql\nSELECT 1\n```", "One.")
     at = AppTest.from_file(str(APP), default_timeout=30).run()

@@ -42,6 +42,24 @@ DEFAULT_NOTES = {
         "COUNT(DISTINCT order_id). geolocation has many rows per zip prefix: aggregate it "
         "before joining. Prices are in BRL."),
 }
+# Clickable examples, shown while a conversation is empty. Each passed 3 runs out of 3 at
+# the app defaults (qwen3:4b, num_ctx 8192, built-in notes), checked against hand-written SQL.
+EXAMPLES = {
+    "Chinook (music store)": [
+        "Which 5 customers spent the most in total? Show first name, last name and total spent.",
+        "Which 3 genres earned the most revenue (unit price times quantity)? Show genre name and revenue.",
+        "Which artist has sold the most tracks by quantity? Show artist name and quantity sold.",
+        "How many tracks are longer than 5 minutes?",
+        "How many albums does the artist AC/DC have?",
+    ],
+    "Olist (Brazilian e-commerce)": [
+        "Which 10 product categories have the most orders? Show the English category name and the number of orders.",
+        "How many orders were placed in each month of 2017?",
+        "Which 5 customer states placed the most orders?",
+        "Which 5 customer states have the longest average delivery time in days, from purchase to delivery?",
+        "What percentage of delivered orders arrived after the estimated delivery date?",
+    ],
+}
 UPLOAD = "Upload CSV / Excel"
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "sql-analyst-agent"
 
@@ -194,7 +212,13 @@ turns = state.chats.setdefault(key, [])
 for i, t in enumerate(turns):
     show_turn(i, t, mapping)
 
-if question := st.chat_input("Ask about this data, or follow up on the last answer"):
+question = st.chat_input("Ask about this data, or follow up on the last answer")
+if not turns and key in EXAMPLES:
+    st.caption("Try an example:")
+    for n, example in enumerate(EXAMPLES[key]):
+        if st.button(example, key=f"example-{n}"):
+            question = example
+if question:
     with st.chat_message("user"):
         st.markdown(question)
     with st.spinner("Writing and running SQL..."):
