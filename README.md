@@ -167,7 +167,8 @@ to reproduce the headline (about 15 min per run on an RTX 4050 laptop).
   makes the 4B join `order_items` even for one-table questions ("average review score",
   "payment total per type"), which repeats each review / payment once per item. The
   fan-out check flags the join, and the model resends it. None of the example questions
-  hit this.
+  hit this. Adding "Join only the tables the question needs" to the notes made it worse
+  (two example questions dropped from 3/3 to 0/3 by joining `order_reviews`), so it isn't shipped.
 - **Context.** At 4096 tokens, very wide schemas fall back to table selection and then to
   dropping sample rows; if even that doesn't fit, the agent says so instead of answering.
 - **Groq free tier.** 8,000 tokens/minute is ~4 questions/minute; the agent waits out
@@ -256,6 +257,11 @@ docker compose up --build            # http://localhost:8501
   project uses it only as a non-commercial demo. Kaggle needs a login, so download it by
   hand and run `python data/download_olist.py path/to/archive.zip` (a zip or an extracted
   folder). The raw files and the built `data/olist.sqlite` are not committed.
-- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io),
-  downloaded by `data/download_bird.py`, used only for the benchmark and
-  not committed.
+- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io), licensed
+  [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Downloaded by
+  `data/download_bird.py` and not committed; the files in `eval/results/` that contain
+  BIRD questions, SQL or results are derived from it and shared under the same license
+  ([eval/results/LICENSE](eval/results/LICENSE)). Citation: Jinyang Li, Binyuan Hui,
+  Ge Qu, et al., "Can LLM Already Serve as A Database Interface? A BIg Bench for
+  Large-Scale Database Grounded Text-to-SQLs", NeurIPS 2023 Datasets and Benchmarks
+  Track, [arXiv:2305.03111](https://arxiv.org/abs/2305.03111).

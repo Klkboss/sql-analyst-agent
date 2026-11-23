@@ -1,0 +1,15 @@
+Files in this directory that contain BIRD questions, evidence hints, gold SQL or query
+results (the CSV files, bird_sample.json, summary.md and failures.md) are derived from the
+BIRD benchmark dev set:
+
+  Jinyang Li, Binyuan Hui, Ge Qu, et al. "Can LLM Already Serve as A Database Interface?
+  A BIg Bench for Large-Scale Database Grounded Text-to-SQLs." NeurIPS 2023 Datasets and
+  Benchmarks Track. https://arxiv.org/abs/2305.03111
+
+  https://bird-bench.github.io
+
+BIRD is licensed under Creative Commons Attribution-ShareAlike 4.0 International
+(CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
+
+These derived files are shared under the same license, CC BY-SA 4.0. Changes from the
+original: a 200-question sample, model outputs, scores and annotations were added.
