@@ -1,0 +1,10 @@
+[server]
+# Uploads are loaded into memory and SQLite; keep them laptop-sized.
+maxUploadSize = 50
+# Only this machine can open the app (Streamlit's default listens on every network
+# interface, so anyone on the same Wi-Fi could query your data). Docker overrides this.
+address = "localhost"
+
+[browser]
+# Don't send Streamlit usage statistics.
+gatherUsageStats = false

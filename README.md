@@ -1,11 +1,12 @@
 # LLM Data Analyst Agent
 
-Ask a question in plain English about a SQLite database; the agent writes a
-SELECT query with an LLM, runs it in a read-only sandbox, fixes its own
-mistakes (up to 3 retries), and returns the table, the SQL and a short
-explanation. Runs locally on Ollama; Groq is an optional cloud provider.
+Ask a question in plain English about a database or your own CSV / Excel files;
+the agent writes a SQLite SELECT query with an LLM, runs it in a read-only sandbox,
+fixes its own mistakes (up to 3 retries), and answers with a chart, the result table,
+a short explanation and the SQL it ran. Follow-up questions build on earlier ones.
+Runs locally on Ollama; Groq is an optional cloud provider.
 
-Status: Phase 1 (core agent + CLI) and Phase 2 (BIRD benchmark) done.
+Status: Phase 1 (core agent + CLI), Phase 2 (BIRD benchmark) and Phase 3 (Streamlit UI) done.
 
 **BIRD dev, 200 questions, shipped defaults (qwen3:4b on a 6 GB laptop GPU):**
 
@@ -26,12 +27,14 @@ py -3.11 -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env          # then edit if needed
 python data/download_chinook.py
-ollama pull qwen2.5-coder:7b
+python data/download_olist.py   # optional, see "Data" below
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ```
 
 ## Usage
 
 ```bash
+streamlit run app.py            # web UI at http://localhost:8501
 python cli.py "Which 5 customers spent the most in total?"
 python eval_chinook.py          # 10-question accuracy check
 python data/download_bird.py    # BIRD dev set: 346 MB download, ~1.5 GB on disk
@@ -39,6 +42,23 @@ python -m eval.bird             # BIRD benchmark (resumable; --limit 10 for a pi
 python -m eval.report           # -> eval/results/summary.md, failures.md
 pytest                          # unit tests, no LLM needed
 ```
+
+## The app
+
+- **Data:** Chinook (music store), Olist (Brazilian e-commerce), or upload CSV / Excel
+  files. Each file or sheet becomes a table in a temporary SQLite file; names are
+  cleaned to snake_case for the SQL (`Order Date` -> `order_date`), and results and
+  charts show your original column names.
+- **Answer:** a 1–2 sentence explanation, a chart picked by rules (single number ->
+  metric card, dates -> line, label + number -> bar, two numbers -> scatter, one
+  number column -> histogram), the table, the SQL, and the log of every attempt.
+- **Data notes:** hints you write ("revenue = price + freight_value", "prices are in BRL")
+  are added to every question the same way BIRD's evidence hints are, which were worth
+  ~16 points of accuracy in the benchmark.
+- **Follow-ups:** the last 3 questions and their SQL go into the prompt, so "now only
+  2017" edits the previous query. If that overflows the context window, older turns
+  are dropped first, the newest is kept as long as possible.
+- Listens on `localhost` only, uploads capped at 50 MB (`.streamlit/config.toml`).
 
 ## How it works
 
@@ -58,6 +78,9 @@ question ─► schema.py ─► (too big for context? pick tables first) ─►
 | `agent/sandbox.py` | SQL guard + locked-down execution |
 | `agent/loop.py` | Generate → run → check → retry; records every attempt |
 | `agent/explain.py` | 1–2 sentence answer from the result |
+| `agent/ingest.py` | CSV / Excel -> SQLite, snake_case names + map back to the originals |
+| `agent/charts.py` | Rule-based chart choice -> Plotly figure |
+| `app.py` | Streamlit chat UI |
 
 ### Sandbox: four layers
 
@@ -143,3 +166,17 @@ What the numbers say:
   few california_schools). It works (74% EX on those questions when the result fits, 7B `c_retry+ev`), but
   5 questions per run picked very wide tables and still overflowed 4096 tokens.
 - **Lenient EX is within 0.5 points of EX**, so the misses are real, not formatting.
+
+## Data
+
+- **Chinook** sample database by Luis Rocha,
+  [lerocha/chinook-database](https://github.com/lerocha/chinook-database) (MIT).
+- **Olist**: [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce),
+  ~100k orders from 2016–2018, licensed
+  [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): non-commercial
+  use only, with attribution, and derived data shared under the same license. Kaggle
+  needs a login, so download it by hand and run
+  `python data/download_olist.py path/to/archive.zip` (a zip or an extracted folder).
+  The raw files and the built `data/olist.sqlite` are not committed.
+- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io), downloaded by
+  `data/download_bird.py`, used only for the benchmark.
