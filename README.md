@@ -30,6 +30,7 @@ which is why the app has a **Data notes** box: your own hints, passed to the mod
 - [Setup](#setup)
 - [The app](#the-app)
 - [Data](#data)
+- [License](#license)
 
 ## How it works
 
@@ -265,3 +266,9 @@ docker compose up --build            # http://localhost:8501
   Ge Qu, et al., "Can LLM Already Serve as A Database Interface? A BIg Bench for
   Large-Scale Database Grounded Text-to-SQLs", NeurIPS 2023 Datasets and Benchmarks
   Track, [arXiv:2305.03111](https://arxiv.org/abs/2305.03111).
+
+## License
+
+Code: [MIT](LICENSE). The datasets keep their own licenses (see "Data"): BIRD-derived
+files in `eval/results/` are CC BY-SA 4.0 ([eval/results/LICENSE](eval/results/LICENSE)),
+and Olist is CC BY-NC-SA 4.0 (not included in this repository).
