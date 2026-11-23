@@ -101,3 +101,29 @@ def test_still_too_big_is_flagged_not_hidden(db, fake_llm, monkeypatch):
     monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 10)
     fake_llm("artist", "SELECT name FROM artist")
     assert loop.run_agent("q", db).ctx_overflow
+
+
+# --- Follow-up questions (conversation history) -----------------------------------
+
+HISTORY = [(f"question {i}", f"SELECT {i}") for i in range(1, 6)]
+
+
+def test_history_goes_in_as_earlier_turns_last_three_only(db, fake_llm):
+    calls = fake_llm("SELECT name FROM artist")
+    r = loop.run_agent("now only the first one", db, history=HISTORY)
+    roles = [m["role"] for m in calls[0]]
+    assert roles == ["system", "user", "assistant", "user", "assistant", "user", "assistant", "user"]
+    assert calls[0][1]["content"] == "question 3"            # 1 and 2 were cut (MAX_HISTORY_TURNS = 3)
+    assert calls[0][2]["content"] == "```sql\nSELECT 3\n```"  # the model sees its own earlier SQL
+    assert calls[0][-1]["content"] == "now only the first one"
+    assert r.history_used == 3
+
+
+def test_tight_budget_keeps_last_turn_and_tells_table_selection(db, fake_llm, monkeypatch):
+    # Room for the selected schema + one turn, not for the full schema or three turns.
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 370)
+    calls = fake_llm("artist", "SELECT name FROM artist")
+    r = loop.run_agent("and sorted by name?", db, history=HISTORY)
+    assert r.selected_tables == ["artist"] and r.history_used == 1
+    assert "question 5" in calls[0][0]["content"]       # selection saw the previous question
+    assert calls[1][1]["content"] == "question 5"       # and the SQL call kept that turn

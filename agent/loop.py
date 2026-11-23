@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 
 # Context kept free for the model's answer and up to 3 retry turns (SQL + error each).
 RESERVED_TOKENS = 1024
+# Earlier (question, SQL) turns sent with a follow-up question.
+MAX_HISTORY_TURNS = 3
 
 
 @dataclass
@@ -47,6 +49,7 @@ class AgentResult:
     selected_tables: list[str] | None = None  # set when table selection ran
     select_ms: float = 0                       # time spent on table selection
     ctx_overflow: bool = False                 # prompt still over budget after selection
+    history_used: int = 0                      # earlier turns that fit in the prompt
 
     @property
     def ok(self) -> bool:
@@ -71,40 +74,62 @@ def _suspicious(r: QueryResult, zero_agg: bool = False) -> str | None:
     return None
 
 
-def _fit_schema(db_path, question, evidence, detail, out: AgentResult) -> list[dict]:
-    """Initial messages, with table selection if the full schema doesn't fit the context."""
+def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) -> list[dict]:
+    """Initial messages, shrunk to fit the context window in three steps (logged, never silent):
+    1. drop older history turns, keeping the last one (a follow-up needs it most);
+    2. show only the tables this question needs (one extra LLM call);
+    3. drop the last history turn too.
+    """
     budget = config.CONTEXT_LIMIT - RESERVED_TOKENS
-    messages = generator.initial_messages(get_schema(db_path, detail), question, evidence)
-    out.prompt_tokens_est = generator.estimate_tokens(messages)
-    if out.prompt_tokens_est <= budget:
-        return messages
 
-    log.warning("prompt ~%d tokens > budget %d: selecting tables first", out.prompt_tokens_est, budget)
-    start = time.perf_counter()
-    reply = llm.chat(generator.table_select_messages(get_schema(db_path, "names"), question, evidence))
-    out.select_ms = (time.perf_counter() - start) * 1000
-    out.selected_tables = generator.parse_tables(reply.text, list_tables(db_path)) or None
-    log.info("selected tables: %s", out.selected_tables or "none recognised - keeping all")
-    if out.selected_tables:
-        schema = get_schema(db_path, detail, tuple(out.selected_tables))
-        messages = generator.initial_messages(schema, question, evidence)
-        out.prompt_tokens_est = generator.estimate_tokens(messages)
-    if out.prompt_tokens_est > budget:
+    def build(schema, hist):
+        m = generator.initial_messages(schema, question, evidence, hist)
+        return m, generator.estimate_tokens(m)
+
+    schema = get_schema(db_path, detail)
+    messages, est = build(schema, history)
+    while est > budget and len(history) > 1:
+        history = history[1:]
+        log.info("prompt over budget: dropped oldest history turn (%d left)", len(history))
+        messages, est = build(schema, history)
+
+    if est > budget:
+        log.warning("prompt ~%d tokens > budget %d: selecting tables first", est, budget)
+        # A follow-up like "only for 2017" names no tables; the previous question does.
+        ask = f"{history[-1][0]}\nFollow-up question: {question}" if history else question
+        start = time.perf_counter()
+        reply = llm.chat(generator.table_select_messages(get_schema(db_path, "names"), ask, evidence))
+        out.select_ms = (time.perf_counter() - start) * 1000
+        out.selected_tables = generator.parse_tables(reply.text, list_tables(db_path)) or None
+        log.info("selected tables: %s", out.selected_tables or "none recognised - keeping all")
+        if out.selected_tables:
+            schema = get_schema(db_path, detail, tuple(out.selected_tables))
+            messages, est = build(schema, history)
+
+    if est > budget and history:
+        history = []
+        log.info("prompt over budget: dropped the last history turn")
+        messages, est = build(schema, history)
+
+    out.prompt_tokens_est, out.history_used = est, len(history)
+    if est > budget:
         out.ctx_overflow = True
-        log.warning("prompt still ~%d tokens after selection; Ollama will truncate it",
-                    out.prompt_tokens_est)
+        log.warning("prompt still ~%d tokens after selection; Ollama will truncate it", est)
     return messages
 
 
 def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_RETRIES, *,
               evidence: str | None = None, schema_detail: str = "full",
-              zero_agg_suspicious: bool | None = None, strict_retry: bool | None = None) -> AgentResult:
+              zero_agg_suspicious: bool | None = None, strict_retry: bool | None = None,
+              history: list[tuple[str, str]] | None = None) -> AgentResult:
+    """`history`: earlier (question, SQL) turns of this conversation, oldest first."""
     # None = use the .env switch; the benchmark passes explicit values.
     zero_agg = config.SUSPECT_ZERO_AGG if zero_agg_suspicious is None else zero_agg_suspicious
     strict = config.STRICT_RETRY if strict_retry is None else strict_retry
 
     out = AgentResult(question)
-    messages = _fit_schema(db_path, question, evidence, schema_detail, out)
+    recent = list(history or [])[-MAX_HISTORY_TURNS:]
+    messages = _fit_schema(db_path, question, evidence, schema_detail, recent, out)
     warned_sql = None  # SQL we flagged as suspicious last round
 
     for n in range(1, max_retries + 2):  # first try + retries

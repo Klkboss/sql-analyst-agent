@@ -42,11 +42,18 @@ def user_message(question: str, evidence: str | None = None) -> str:
     return f"{question}\nHint: {evidence}" if evidence else question
 
 
-def initial_messages(schema: str, question: str, evidence: str | None = None) -> list[dict]:
-    return [
-        {"role": "system", "content": SYSTEM_PROMPT.format(schema=schema)},
-        {"role": "user", "content": user_message(question, evidence)},
-    ]
+def initial_messages(schema: str, question: str, evidence: str | None = None,
+                     history: list[tuple[str, str]] = ()) -> list[dict]:
+    """System prompt, then earlier (question, SQL) turns, then the new question.
+
+    Follow-ups ("now only for 2017") work because the model sees the SQL it wrote last
+    time as its own earlier reply. Result rows are left out to save context.
+    """
+    messages = [{"role": "system", "content": SYSTEM_PROMPT.format(schema=schema)}]
+    for q, sql in history:
+        messages += [{"role": "user", "content": q}, {"role": "assistant", "content": f"```sql\n{sql}\n```"}]
+    messages.append({"role": "user", "content": user_message(question, evidence)})
+    return messages
 
 
 def feedback_messages(llm_reply: str, problem: str, strict: bool = False) -> list[dict]:
