@@ -117,6 +117,34 @@ def write_summary(results) -> None:
 
 # --- failures.md --------------------------------------------------------------------
 
+# Hand-written notes for examples the picker selects (by question id), written after
+# reading the attempts. Kept here so regenerating the report doesn't lose them.
+NOTES = {
+    164: "`order` is an SQL keyword, so the table name must be quoted. The syntax error was "
+         "enough for the model to fix it on the first retry.",
+    52: "A lucky pass: the model ignored the hint (it used `NumGE1500 >= 1` instead of summing the "
+        "three scores) and still got the right count. EX only checks the result, so small answers "
+        "like a count can reward wrong SQL.",
+    379: "The 0-row check working as designed: 'Duel Deck A' is not a set name, the feedback "
+         "pointed at the sample rows, and the model found `cards.duelDeck = 'a'`.",
+    190: "Fix 1 working as designed: COUNT = 0 came from filtering the wrong column (`A2` is the "
+         "district name, `A3` is the region). Phase 1's 0-rows check would have accepted the 0.",
+    920: "Fix 2 backfired. Both runs started with the wrong value 'Silverstone' (the user wrote "
+         "'Silverstone Circuit'). The plain retry fixed it; with the strict note the model treated "
+         "'return the same SQL' as permission and resubmitted it. The note should point at the "
+         "user's words, not the model's SQL.",
+    42: "A made-up column name, repeated unchanged on all 3 retries: the error alone didn't help. "
+        "qwen2.5-coder did this on 7 of its 42 retried questions in `c_retry`; qwen3 never did.",
+    28: "SQLite `=` is case-sensitive: the data says 'Locally funded', the model wrote "
+        "'Locally Funded', got 0 rows and then confirmed the empty result instead of checking case.",
+    228: "Right answer, but not rounded to the 4 decimals the question asked for. A miss under "
+         "BIRD's rule; lenient EX accepts it.",
+    1170: "Dialect mix-up: `DATE_ADD(..., INTERVAL 1 YEAR)` is MySQL; SQLite uses "
+          "`date(x, '+1 year')`. Repeated unchanged 3 times.",
+    158: "Our bug: schema.py shows the table as bare `order`, but it is an SQL keyword. qwen3 "
+         "never thought to quote it. Fix: quote reserved words in `_show()`.",
+}
+
 def _pick(results):
     """Yield (title, model, run, question_id, base_run): stories first, then failure types."""
     for model in MODELS:
@@ -153,6 +181,8 @@ def _example(i, title, model, run, qid, base_run, results) -> str:
            f"`q{qid}` · {row.db_id} · {row.difficulty} · {model} · run `{run}` · "
            f"{'PASS' if row.ex else 'FAIL'} ({row.reason or 'pass'})", "",
            f"**Question:** {row.question}", ""]
+    if qid in NOTES:
+        out += [f"> **Why it matters:** {NOTES[qid]}", ""]
     if row.evidence:
         out += [f"**Evidence (shown to the model):** {row.evidence}", ""]
     if base_run:
