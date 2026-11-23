@@ -16,3 +16,4 @@ venv/
 data/*.sqlite
 data/*.db
 data/*.part
+data/bird/

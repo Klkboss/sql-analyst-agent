@@ -8,13 +8,13 @@ Usage: python eval_chinook.py
 """
 import sys
 import time
-from collections import Counter
 
 from tabulate import tabulate
 
 from agent import config
 from agent.loop import run_agent
 from agent.sandbox import run_query
+from eval.metrics import lenient_match
 
 DB = "data/chinook.sqlite"
 
@@ -49,13 +49,6 @@ CASES = [
 ]
 
 
-def _norm(rows) -> Counter:
-    """Order-insensitive fingerprint of a result: rows as sorted value tuples, numbers to 2 dp."""
-    def val(v):
-        return f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
-    return Counter(tuple(sorted(val(v) for v in row)) for row in rows)
-
-
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
     model = config.OLLAMA_MODEL if config.LLM_PROVIDER == "ollama" else config.GROQ_MODEL
@@ -65,7 +58,7 @@ def main() -> None:
     for i, (level, question, gold_sql) in enumerate(CASES, 1):
         gold = run_query(DB, gold_sql).rows
         r = run_agent(question, DB)
-        ok = r.result is not None and _norm(r.result.rows) == _norm(gold)
+        ok = r.result is not None and lenient_match(r.result.rows, gold)
         passed += ok
         speeds = [a.tokens_per_sec for a in r.attempts if a.tokens_per_sec]
         table.append((i, level, "PASS" if ok else "FAIL", len(r.attempts) - 1,
