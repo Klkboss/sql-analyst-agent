@@ -8,14 +8,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from agent import config
-from eval.bird import (BIRD, DEFAULT_RUNS, MODELS, PER_DIFFICULTY, PRED_TIMEOUT_S,
+from eval.bird import (BENCH_NUM_CTX, BIRD, DEFAULT_RUNS, MODELS, PER_DIFFICULTY, PRED_TIMEOUT_S,
                        RESULTS, SEED)
 
 DIFFS = ["simple", "moderate", "challenging"]
 WHAT = {"a_names": "names only", "b_schema": "+ full schema", "c_retry": "+ self-correction",
         "c_zero": "+ fix 1 (zero aggregate)", "c_strict": "+ fix 2 (strict retry)",
-        "c_both": "+ fix 1 + fix 2", "final": "shipped defaults"}
+        "c_both": "+ fix 1 + fix 2", "final": "shipped defaults", "final_fanout": "shipped + fan-out check",
+        "final_noshape": "shipped without SQL-shape check"}
 
 
 def _slug(model: str) -> str:
@@ -73,7 +73,9 @@ def paired_table(results, model) -> str:
     """Each fix vs the run it extends, question by question: how many it fixed and broke."""
     pairs = [("c_retry", "b_schema"), ("c_zero", "c_retry"), ("c_strict", "c_retry"),
              ("c_both", "c_retry"), ("b_schema+ev", "b_schema"), ("c_retry+ev", "c_retry"),
-             ("c_both+ev", "c_retry+ev"), ("final", "c_zero"), ("final+ev", "c_retry+ev")]
+             ("c_both+ev", "c_retry+ev"), ("final", "c_zero"), ("final+ev", "c_retry+ev"),
+             ("final_fanout", "final"), ("final_fanout+ev", "final+ev"),
+             ("final", "final_noshape"), ("final+ev", "final_noshape+ev")]
     rows = []
     for new, base in pairs:
         if (model, new) in results and (model, base) in results:
@@ -99,7 +101,7 @@ def write_summary(results) -> None:
         "# BIRD dev benchmark", "",
         f"Generated {date.today()} by `python -m eval.report`. "
         f"Sample: {n} questions ({' / '.join(f'{v} {k}' for k, v in PER_DIFFICULTY.items())}), "
-        f"seed {SEED}, ids in `bird_sample.json`. Ollama `num_ctx={config.OLLAMA_NUM_CTX}`, "
+        f"seed {SEED}, ids in `bird_sample.json`. Ollama `num_ctx={BENCH_NUM_CTX}` (pinned), "
         f"query timeout {PRED_TIMEOUT_S}s, temperature 0.", "",
         "- **EX** = execution accuracy, BIRD's official rule (same set of result rows).",
         "- **Adjusted EX** re-weights the per-difficulty scores to BIRD dev's real mix "

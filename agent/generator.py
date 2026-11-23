@@ -17,7 +17,7 @@ Rules:
 - Match text values exactly as they appear in the sample rows.
 - Names shown in double quotes contain spaces or symbols: keep the quotes in your SQL.
 - Never modify data: SELECT (or WITH ... SELECT) only.
-- Reply with the SQL inside a ```sql code block and nothing else.
+{extra_rules}- Reply with the SQL inside a ```sql code block and nothing else.
 
 Schema:
 {schema}"""
@@ -46,13 +46,16 @@ def user_message(question: str, evidence: str | None = None) -> str:
 
 
 def initial_messages(schema: str, question: str, evidence: str | None = None,
-                     history: list[tuple[str, str]] = ()) -> list[dict]:
+                     history: list[tuple[str, str]] = (), extra_rules: tuple[str, ...] = ()) -> list[dict]:
     """System prompt, then earlier (question, SQL) turns, then the new question.
 
     Follow-ups ("now only for 2017") work because the model sees the SQL it wrote last
     time as its own earlier reply. Result rows are left out to save context.
+    `extra_rules` are switchable prompt rules (e.g. the fan-out rule), so the benchmark
+    can measure them.
     """
-    messages = [{"role": "system", "content": SYSTEM_PROMPT.format(schema=schema)}]
+    rules = "".join(f"- {r}\n" for r in extra_rules)
+    messages = [{"role": "system", "content": SYSTEM_PROMPT.format(schema=schema, extra_rules=rules)}]
     for q, sql in history:
         messages += [{"role": "user", "content": q}, {"role": "assistant", "content": f"```sql\n{sql}\n```"}]
     messages.append({"role": "user", "content": user_message(question, evidence)})

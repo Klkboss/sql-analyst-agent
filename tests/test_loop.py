@@ -190,3 +190,23 @@ def test_repeated_failing_sql_is_called_out(db, fake_llm):
     r = loop.run_agent("names", db)
     assert "exact query before" not in r.attempts[0].error
     assert "exact query before" in r.attempts[1].error and r.ok
+
+
+# --- Join fan-out switch ------------------------------------------------------------
+
+FANNED = "SELECT COUNT(a.id) FROM artist a JOIN album b ON b.artist_id = a.id"  # artist rows repeat per album
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_fanout_switch_controls_rule_and_check(tmp_path, fake_llm, on):
+    import sqlite3
+    from contextlib import closing
+    db = tmp_path / "fan.sqlite"
+    with closing(sqlite3.connect(db)) as c:  # artist 1 has two albums, so its rows repeat
+        c.executescript("""CREATE TABLE artist (id INTEGER PRIMARY KEY, name TEXT);
+            CREATE TABLE album (id INTEGER PRIMARY KEY, artist_id INTEGER REFERENCES artist(id));
+            INSERT INTO artist VALUES (1, 'a'), (2, 'b'); INSERT INTO album VALUES (1, 1), (2, 1), (3, 2);""")
+    calls = fake_llm(FANNED, "SELECT COUNT(DISTINCT a.id) FROM artist a JOIN album b ON b.artist_id = a.id")
+    r = loop.run_agent("how many artists have albums?", db, check_fanout=on)
+    assert ("COUNT(DISTINCT key)" in calls[0][0]["content"]) is on   # prompt rule
+    assert len(r.attempts) == (2 if on else 1)                       # self-check retry

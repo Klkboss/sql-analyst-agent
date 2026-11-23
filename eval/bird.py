@@ -32,7 +32,7 @@ MODELS = ["qwen2.5-coder:7b", "qwen3:4b-instruct-2507-q4_K_M"]
 
 # Every config sets every switch explicitly, so values in .env can't leak into the benchmark.
 _BASE = dict(schema_detail="full", max_retries=3, zero_agg_suspicious=False, strict_retry=False,
-             check_shape=False)
+             check_shape=False, check_fanout=False)
 CONFIGS = {
     "a_names":  dict(_BASE, schema_detail="names", max_retries=0),  # baseline: names only
     "b_schema": dict(_BASE, max_retries=0),                          # + types, keys, sample rows
@@ -43,10 +43,14 @@ CONFIGS = {
     # The shipped defaults, run on the final code (keyword quoting, join paths in the
     # schema, SQL-shape check), so the README headline matches what ships.
     "final":    dict(_BASE, zero_agg_suspicious=True, check_shape=True),
+    # One switch flipped from "final", to count what each switch fixes and breaks.
+    "final_fanout":  dict(_BASE, zero_agg_suspicious=True, check_shape=True, check_fanout=True),
+    "final_noshape": dict(_BASE, zero_agg_suspicious=True),
 }
 # A run is a config name, plus "+ev" to append BIRD's human-written evidence hint.
 DEFAULT_RUNS = ["a_names", "b_schema", "c_retry", "c_zero", "c_strict", "c_both",
-                "a_names+ev", "b_schema+ev", "c_retry+ev", "c_both+ev", "final", "final+ev"]
+                "a_names+ev", "b_schema+ev", "c_retry+ev", "c_both+ev", "final", "final+ev",
+                "final_fanout", "final_fanout+ev", "final_noshape", "final_noshape+ev"]
 
 FIELDS = ["question_id", "db_id", "difficulty", "ex", "ex_lenient", "reason", "retries",
           "latency_ms", "select_ms", "tokens_per_sec", "prompt_tokens_est", "selected_tables",
@@ -56,6 +60,8 @@ FIELDS = ["question_id", "db_id", "difficulty", "ex", "ex_lenient", "reason", "r
 # Benchmark limits: more generous than the CLI so slow-but-correct SQL on the big
 # databases (european_football_2 is 600 MB) isn't scored as wrong.
 PRED_TIMEOUT_S, GOLD_TIMEOUT_S, MAX_ROWS = 30, 120, 100_000
+# Pinned so published numbers stay comparable, whatever OLLAMA_NUM_CTX the app uses.
+BENCH_NUM_CTX = 4096
 
 
 def db_path(q: dict) -> Path:
@@ -135,7 +141,7 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="  [%(name)s] %(message)s")
 
     config.LLM_PROVIDER = "ollama"
-    config.CONTEXT_LIMIT = config.OLLAMA_NUM_CTX
+    config.OLLAMA_NUM_CTX = config.CONTEXT_LIMIT = BENCH_NUM_CTX
     config.QUERY_TIMEOUT_S, config.MAX_ROWS = PRED_TIMEOUT_S, MAX_ROWS
 
     sample = load_sample()

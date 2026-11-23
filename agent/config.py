@@ -20,7 +20,9 @@ LLM_PROVIDER = _env("LLM_PROVIDER", "ollama").lower()
 OLLAMA_HOST = _env("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
 # Default chosen by the BIRD benchmark: beat the 7B coder and fits fully in 6 GB VRAM.
 OLLAMA_MODEL = _env("OLLAMA_MODEL", "qwen3:4b-instruct-2507-q4_K_M")
-OLLAMA_NUM_CTX = int(_env("OLLAMA_NUM_CTX", "4096"))
+# 8192 for the app/CLI: Olist + built-in notes + history fit without table selection, and the
+# 4B model still runs 100% on a 6 GB GPU (3.3 GB). The benchmark pins its own 4096.
+OLLAMA_NUM_CTX = int(_env("OLLAMA_NUM_CTX", "8192"))
 OLLAMA_NUM_GPU = int(_env("OLLAMA_NUM_GPU")) if _env("OLLAMA_NUM_GPU") else None  # None = auto
 OLLAMA_KEEP_ALIVE = _env("OLLAMA_KEEP_ALIVE", "10m")
 
@@ -44,3 +46,6 @@ STRICT_RETRY = _env("STRICT_RETRY", "0") == "1"
 # SQL-shape self-check (agent/sqlcheck.py): a scalar subquery in a JOIN's ON condition, or
 # ranking by a computed value without returning it, triggers a retry. Found on Olist.
 CHECK_SQL_SHAPE = _env("CHECK_SQL_SHAPE", "1") == "1"
+# Join fan-out check (agent/fanout.py) + prompt rule: COUNT/SUM over rows a one-to-many join
+# repeated. Default decided by the BIRD run: on only if it fixes more than it breaks.
+CHECK_FANOUT = _env("CHECK_FANOUT", "0") == "1"

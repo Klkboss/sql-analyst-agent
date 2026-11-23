@@ -24,6 +24,7 @@ from agent import config, generator, llm
 from agent.sandbox import GuardError, QueryResult, run_query
 from agent.schema import _needs_quotes as needs_quotes
 from agent.schema import bridge_tables, get_schema, list_tables
+from agent.fanout import FANOUT_RULE, fanout_problem
 from agent.sqlcheck import fix_keyword_aliases, shape_problem
 
 log = logging.getLogger(__name__)
@@ -87,7 +88,8 @@ def _keyword_hint(error: str) -> str:
     return ""
 
 
-def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) -> list[dict]:
+def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult,
+                rules: tuple[str, ...] = ()) -> list[dict]:
     """Initial messages, shrunk to fit the context window in three steps (logged, never silent):
     1. drop older history turns, keeping the last one (a follow-up needs it most);
     2. show only the tables this question needs (one extra LLM call);
@@ -96,7 +98,7 @@ def _fit_schema(db_path, question, evidence, detail, history, out: AgentResult) 
     budget = config.CONTEXT_LIMIT - RESERVED_TOKENS
 
     def build(schema, hist):
-        m = generator.initial_messages(schema, question, evidence, hist)
+        m = generator.initial_messages(schema, question, evidence, hist, rules)
         return m, generator.estimate_tokens(m)
 
     schema = get_schema(db_path, detail)
@@ -137,16 +139,18 @@ def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_
               evidence: str | None = None, schema_detail: str = "full",
               zero_agg_suspicious: bool | None = None, strict_retry: bool | None = None,
               history: list[tuple[str, str]] | None = None,
-              check_shape: bool | None = None) -> AgentResult:
+              check_shape: bool | None = None, check_fanout: bool | None = None) -> AgentResult:
     """`history`: earlier (question, SQL) turns of this conversation, oldest first."""
     # None = use the .env switch; the benchmark passes explicit values.
     zero_agg = config.SUSPECT_ZERO_AGG if zero_agg_suspicious is None else zero_agg_suspicious
     strict = config.STRICT_RETRY if strict_retry is None else strict_retry
     shape = config.CHECK_SQL_SHAPE if check_shape is None else check_shape
+    fanout = config.CHECK_FANOUT if check_fanout is None else check_fanout
 
     out = AgentResult(question)
     recent = list(history or [])[-MAX_HISTORY_TURNS:]
-    messages = _fit_schema(db_path, question, evidence, schema_detail, recent, out)
+    messages = _fit_schema(db_path, question, evidence, schema_detail, recent, out,
+                           (FANOUT_RULE,) if fanout else ())
     warned_sql = None  # SQL we flagged as suspicious last round
     failed = set()     # SQL that already errored: resending it is a wasted retry at temperature 0
 
@@ -161,7 +165,9 @@ def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_
             out.result, out.sql = result, sql
             # Same SQL resubmitted after a warning = model confirms the empty/zero answer.
             problem = None if sql == warned_sql else (
-                _suspicious(result, zero_agg) or (shape_problem(sql, question) if shape else None))
+                _suspicious(result, zero_agg)
+                or (shape_problem(sql, question) if shape else None)
+                or (fanout_problem(sql, db_path) if fanout else None))
             warned_sql = sql if problem else None
         except (GuardError, TimeoutError, sqlite3.Error) as e:
             problem = f"The query failed with error: {e}" + _keyword_hint(str(e))
