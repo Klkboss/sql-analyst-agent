@@ -15,7 +15,7 @@ from eval.bird import (BIRD, DEFAULT_RUNS, MODELS, PER_DIFFICULTY, PRED_TIMEOUT_
 DIFFS = ["simple", "moderate", "challenging"]
 WHAT = {"a_names": "names only", "b_schema": "+ full schema", "c_retry": "+ self-correction",
         "c_zero": "+ fix 1 (zero aggregate)", "c_strict": "+ fix 2 (strict retry)",
-        "c_both": "+ fix 1 + fix 2"}
+        "c_both": "+ fix 1 + fix 2", "final": "shipped defaults"}
 
 
 def _slug(model: str) -> str:
@@ -73,7 +73,7 @@ def paired_table(results, model) -> str:
     """Each fix vs the run it extends, question by question: how many it fixed and broke."""
     pairs = [("c_retry", "b_schema"), ("c_zero", "c_retry"), ("c_strict", "c_retry"),
              ("c_both", "c_retry"), ("b_schema+ev", "b_schema"), ("c_retry+ev", "c_retry"),
-             ("c_both+ev", "c_retry+ev")]
+             ("c_both+ev", "c_retry+ev"), ("final", "c_zero"), ("final+ev", "c_retry+ev")]
     rows = []
     for new, base in pairs:
         if (model, new) in results and (model, base) in results:
