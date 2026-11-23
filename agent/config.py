@@ -47,5 +47,5 @@ STRICT_RETRY = _env("STRICT_RETRY", "0") == "1"
 # ranking by a computed value without returning it, triggers a retry. Found on Olist.
 CHECK_SQL_SHAPE = _env("CHECK_SQL_SHAPE", "1") == "1"
 # Join fan-out check (agent/fanout.py) + prompt rule: COUNT/SUM over rows a one-to-many join
-# repeated. Default decided by the BIRD run: on only if it fixes more than it breaks.
+# repeated. Off: on BIRD it fixed 6 and broke 9-10 (the prompt rule, not the check, moved them).
 CHECK_FANOUT = _env("CHECK_FANOUT", "0") == "1"

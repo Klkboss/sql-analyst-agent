@@ -12,11 +12,13 @@ Status: Phase 1 (core agent + CLI), Phase 2 (BIRD benchmark) and Phase 3 (Stream
 
 | | Execution accuracy | Adjusted to BIRD's difficulty mix |
 |---|---|---|
-| **Without hints** (what real users get) | **40.0%** | **43.4%** |
-| With BIRD's evidence hints | 56.5% | 59.7% |
+| **Without hints** (what real users get) | **38.5%** | **41.0%** |
+| With BIRD's evidence hints | 57.0% | 58.0% |
 
 Real users don't get BIRD's hand-written evidence hints, so the first row is the
-realistic number. The hints are worth ~16 points, which is why the app has a
+realistic number. The benchmark pins Ollama's context at 4096 tokens so runs stay
+comparable; the app and CLI default to 8192 (`OLLAMA_NUM_CTX`), which the 4B model
+still fits fully on the GPU (3.3 GB). The hints are worth ~16 points, which is why the app has a
 "Data notes" box where users can add their own, passed to the model the same way.
 
 ## Setup
@@ -76,7 +78,9 @@ question ─► schema.py ─► (too big for context? pick tables first) ─►
 | `agent/schema.py` | Schema as prompt text: columns, types, keys, 3 sample rows (long values cut to 50 chars) |
 | `agent/generator.py` | System prompt, retry messages, SQL extraction from ```sql blocks |
 | `agent/sandbox.py` | SQL guard + locked-down execution |
-| `agent/loop.py` | Generate → run → check → retry; records every attempt |
+| `agent/loop.py` | Generate → run → check → retry; records every attempt; fits the prompt to the context window |
+| `agent/sqlcheck.py` | SQL shape checks (subquery in a JOIN's ON, ORDER BY metric not returned) and keyword-alias repair |
+| `agent/fanout.py` | Join fan-out check (off by default, see Phase 2 results) |
 | `agent/explain.py` | 1–2 sentence answer from the result |
 | `agent/ingest.py` | CSV / Excel -> SQLite, snake_case names + map back to the originals |
 | `agent/charts.py` | Rule-based chart choice -> Plotly figure |
@@ -134,16 +138,39 @@ annotated examples: [eval/results/failures.md](eval/results/failures.md).
 | `b_schema+ev` | full schema + evidence | 49.5 / 53.0 | 52.5 / 54.8 |
 | `c_retry+ev` | + self-correction + evidence | 51.5 / 55.5 | **56.0 / 58.5** |
 | `c_both+ev` | + both fixes + evidence | 51.5 / **56.0** | 55.5 / 58.3 |
-| **`final`** | **shipped defaults** (fix 1 on, fix 2 off, keyword quoting) | – | **40.0 / 43.4** |
-| **`final+ev`** | **shipped defaults + evidence** | – | **56.5 / 59.7** |
+| **`final`** | **shipped defaults** (see below) | – | **38.5 / 41.0** |
+| **`final+ev`** | **shipped defaults + evidence** | – | **57.0 / 58.0** |
 
-Shipped defaults: qwen3:4b, full schema, self-correction, `SUSPECT_ZERO_AGG=1`,
-`STRICT_RETRY=0` (tested, no gain), and SQL keywords quoted in the schema (BIRD's
-`financial.order` table caused syntax errors; the fix removed them). `final` vs `c_zero`
-differs by 1 point, entirely on databases whose prompt didn't change, i.e. run noise.
+Shipped defaults: qwen3:4b, full schema with join paths, self-correction,
+`SUSPECT_ZERO_AGG=1`, `CHECK_SQL_SHAPE=1`, `STRICT_RETRY=0`, `CHECK_FANOUT=0`, SQL
+keywords quoted in the schema, keyword table aliases renamed, and context fallbacks
+(drop bridge tables, then sample rows, before giving up with a clear message).
+
+Each switch, measured question by question on the same 200 questions (qwen3:4b):
+
+| Switch | Default | Fixed / broke, no hints | Fixed / broke, with hints | Verdict |
+|---|---|---|---|---|
+| `SUSPECT_ZERO_AGG` (single 0/NULL row is suspicious) | on | 2 / 0 | – | small real gain |
+| `STRICT_RETRY` (stricter retry prompt) | off | 0 / 1 | – | tested, no gain |
+| `CHECK_SQL_SHAPE` (subquery in JOIN ON, hidden ranking metric) | on | 0 / 2 | 1 / 2 | never fired on BIRD; the diffs are run noise. Kept for the Olist bug it fixes |
+| `CHECK_FANOUT` (join fan-out rule + self-check) | **off** | 6 / 9 | 6 / 10 | breaks more than it fixes |
+
+`SUSPECT_ZERO_AGG` and `STRICT_RETRY` were measured in Phase 2 (`c_retry` → `c_zero` /
+`c_strict`); the other two in the final runs (`final_noshape` → `final`, `final` →
+`final_fanout`). The fan-out self-check itself fired on only 6 questions and changed
+none of the outcomes; the swings came from the prompt rule ("count entities with
+COUNT(DISTINCT key)") changing the first query. BIRD's gold SQL usually counts plain
+rows, so the rule pushes the wrong way there. On Olist the same mistake was real
+(orders counted once per item), so it stays available as a switch.
+
+The Phase 3 schema changes (join paths, keyword quoting) are about neutral on BIRD:
+`c_zero` → `final` is 8 fixed / 13 broke without hints (−2.5) and 15 / 13 with hints
+(+1). The join-path section makes prompts longer, so at the pinned 4096 tokens table
+selection ran on 39.5% of questions instead of 22%. They were built for Olist, where
+they took the reviews-by-category question from 0/4 to 4/4.
 
 Best run by difficulty, simple / moderate / challenging: qwen3:4b `final+ev`
-66.2 / 48.8 / 52.5; qwen2.5-coder:7b `c_retry+ev` 62.5 / 46.2 / 40.0.
+61.3 / 50.0 / 62.5; qwen2.5-coder:7b `c_retry+ev` 62.5 / 46.2 / 40.0.
 Speed: ~30 tok/s for the 7B (84% GPU, 16% CPU) vs ~52 tok/s for the 4B (100% GPU);
 5–7 s per question with self-correction.
 
@@ -162,7 +189,7 @@ What the numbers say:
   broke 1 and fixed 0 on the 4B (0/0 on the 7B): the model read "return the same SQL" as permission to keep a wrong
   value. Even at temperature 0, identical prompts gave different SQL on up to 4 of 200
   questions between runs, so ±1 point differences are not meaningful.
-- **Table selection** ran on 22–24% of questions (card_games, european_football_2 and a
+- **Table selection** ran on 22–24% of questions before the join paths (39.5% after) (card_games, european_football_2 and a
   few california_schools). It works (74% EX on those questions when the result fits, 7B `c_retry+ev`), but
   5 questions per run picked very wide tables and still overflowed 4096 tokens.
 - **Lenient EX is within 0.5 points of EX**, so the misses are real, not formatting.
