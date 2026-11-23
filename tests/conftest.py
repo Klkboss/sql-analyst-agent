@@ -16,6 +16,7 @@ def db(tmp_path):
                 title TEXT,
                 artist_id INTEGER REFERENCES artist(id)
             );
+            CREATE TABLE "order items" ("item id" INTEGER PRIMARY KEY, "unit price" REAL);
             INSERT INTO artist VALUES (1, 'AC/DC'), (2, 'Accept'), (3, 'Aerosmith'), (4, 'Audioslave');
             INSERT INTO album VALUES (1, 'For Those About To Rock', 1),
                                      (2, 'Balls to the Wall', 2),

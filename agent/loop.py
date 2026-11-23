@@ -3,12 +3,15 @@
     attempt 1:  LLM writes SQL  -> sandbox runs it  -> OK? done.
                                     | error / suspicious result
     attempt 2:  LLM sees its SQL + the problem -> new SQL -> ...
-    ... up to 1 + MAX_RETRIES attempts.
+    ... up to 1 + max_retries attempts.
 
-"Suspicious" = ran fine but returned 0 rows or only NULLs. That is often a bug
-(wrong spelling in a WHERE, wrong join) but can be the true answer, so the
-feedback tells the model to return the same SQL if it's sure - and if it does,
-we accept it instead of burning more retries.
+"Suspicious" = ran fine but returned 0 rows or only NULLs (and, with zero_agg_suspicious,
+a single row of 0/NULL like COUNT = 0). That is often a bug (misspelled WHERE value,
+wrong join) but can be the true answer, so the feedback tells the model to return the
+same SQL if it's sure - and if it does, we accept it instead of burning more retries.
+
+Before the first attempt: if the full schema would overflow the model's context window,
+an extra LLM call picks the relevant tables, and only those are shown (logged, never silent).
 """
 import logging
 import sqlite3
@@ -18,9 +21,12 @@ from pathlib import Path
 
 from agent import config, generator, llm
 from agent.sandbox import GuardError, QueryResult, run_query
-from agent.schema import get_schema
+from agent.schema import get_schema, list_tables
 
 log = logging.getLogger(__name__)
+
+# Context kept free for the model's answer and up to 3 retry turns (SQL + error each).
+RESERVED_TOKENS = 1024
 
 
 @dataclass
@@ -34,19 +40,20 @@ class Attempt:
 @dataclass
 class AgentResult:
     question: str
-    result: QueryResult | None  # last result that executed without error (may be "suspicious")
+    result: QueryResult | None = None  # last result that executed without error (may be "suspicious")
+    sql: str | None = None             # the SQL that produced `result`
     attempts: list[Attempt] = field(default_factory=list)
-
-    @property
-    def sql(self) -> str | None:
-        return self.attempts[-1].sql if self.attempts else None
+    prompt_tokens_est: int = 0
+    selected_tables: list[str] | None = None  # set when table selection ran
+    select_ms: float = 0                       # time spent on table selection
+    ctx_overflow: bool = False                 # prompt still over budget after selection
 
     @property
     def ok(self) -> bool:
         return bool(self.attempts) and self.attempts[-1].error is None
 
 
-def _suspicious(r: QueryResult) -> str | None:
+def _suspicious(r: QueryResult, zero_agg: bool = False) -> str | None:
     """Return a feedback message if the result looks wrong, else None."""
     if not r.rows:
         return ("The query ran but returned 0 rows. Check WHERE values against the sample rows "
@@ -55,12 +62,49 @@ def _suspicious(r: QueryResult) -> str | None:
     if all(v is None for row in r.rows for v in row):
         return ("The query ran but every value is NULL. Check the columns, joins and aggregates. "
                 "If that is truly correct, return the same query unchanged.")
+    # Fix 1 (SUSPECT_ZERO_AGG): COUNT/SUM over no matching rows gives one row of 0 - Phase 1's
+    # "0 rows" check never saw it, so a misspelled filter silently answered "0".
+    if zero_agg and len(r.rows) == 1 and all(v is None or v == 0 for v in r.rows[0]):
+        return ("The query returned a single row of 0/NULL, which often means a filter matched "
+                "nothing (e.g. a misspelled value or wrong join). Check WHERE values against the "
+                "sample rows. If 0 is truly the correct answer, return the same query unchanged.")
     return None
 
 
-def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_RETRIES) -> AgentResult:
-    messages = generator.initial_messages(get_schema(db_path), question)
-    out = AgentResult(question, result=None)
+def _fit_schema(db_path, question, evidence, detail, out: AgentResult) -> list[dict]:
+    """Initial messages, with table selection if the full schema doesn't fit the context."""
+    budget = config.CONTEXT_LIMIT - RESERVED_TOKENS
+    messages = generator.initial_messages(get_schema(db_path, detail), question, evidence)
+    out.prompt_tokens_est = generator.estimate_tokens(messages)
+    if out.prompt_tokens_est <= budget:
+        return messages
+
+    log.warning("prompt ~%d tokens > budget %d: selecting tables first", out.prompt_tokens_est, budget)
+    start = time.perf_counter()
+    reply = llm.chat(generator.table_select_messages(get_schema(db_path, "names"), question, evidence))
+    out.select_ms = (time.perf_counter() - start) * 1000
+    out.selected_tables = generator.parse_tables(reply.text, list_tables(db_path)) or None
+    log.info("selected tables: %s", out.selected_tables or "none recognised - keeping all")
+    if out.selected_tables:
+        schema = get_schema(db_path, detail, tuple(out.selected_tables))
+        messages = generator.initial_messages(schema, question, evidence)
+        out.prompt_tokens_est = generator.estimate_tokens(messages)
+    if out.prompt_tokens_est > budget:
+        out.ctx_overflow = True
+        log.warning("prompt still ~%d tokens after selection; Ollama will truncate it",
+                    out.prompt_tokens_est)
+    return messages
+
+
+def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_RETRIES, *,
+              evidence: str | None = None, schema_detail: str = "full",
+              zero_agg_suspicious: bool | None = None, strict_retry: bool | None = None) -> AgentResult:
+    # None = use the .env switch; the benchmark passes explicit values.
+    zero_agg = config.SUSPECT_ZERO_AGG if zero_agg_suspicious is None else zero_agg_suspicious
+    strict = config.STRICT_RETRY if strict_retry is None else strict_retry
+
+    out = AgentResult(question)
+    messages = _fit_schema(db_path, question, evidence, schema_detail, out)
     warned_sql = None  # SQL we flagged as suspicious last round
 
     for n in range(1, max_retries + 2):  # first try + retries
@@ -69,9 +113,9 @@ def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_
         sql = generator.extract_sql(reply.text)
         try:
             result = run_query(db_path, sql)
-            out.result = result
-            # Same SQL resubmitted after a warning = model confirms the empty/NULL answer.
-            problem = None if sql == warned_sql else _suspicious(result)
+            out.result, out.sql = result, sql
+            # Same SQL resubmitted after a warning = model confirms the empty/zero answer.
+            problem = None if sql == warned_sql else _suspicious(result, zero_agg)
             warned_sql = sql if problem else None
         except (GuardError, TimeoutError, sqlite3.Error) as e:
             problem = f"The query failed with error: {e}"
@@ -82,5 +126,5 @@ def run_agent(question: str, db_path: str | Path, max_retries: int = config.MAX_
         log.info("attempt %d: %.0f ms | %s | %s", n, latency, problem or "OK", " ".join(sql.split()))
         if problem is None:
             break
-        messages += generator.feedback_messages(reply.text, problem)
+        messages += generator.feedback_messages(reply.text, problem, strict)
     return out

@@ -34,7 +34,9 @@ def main() -> None:
         headers=["#", "ms", "tok/s", "status"]))
     print(f"Retries used: {len(r.attempts) - 1}")
 
-    print(f"\nSQL:\n{r.sql}\n")
+    if r.selected_tables:
+        print(f"Schema too big for the context window; used tables: {', '.join(r.selected_tables)}")
+    print(f"\nSQL:\n{r.sql or r.attempts[-1].sql}\n")  # sql is None if nothing executed
     if r.result is None:
         print("No query succeeded.")
         sys.exit(1)

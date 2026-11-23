@@ -26,7 +26,15 @@ OLLAMA_KEEP_ALIVE = _env("OLLAMA_KEEP_ALIVE", "10m")
 GROQ_API_KEY = _env("GROQ_API_KEY")
 GROQ_MODEL = _env("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# Sandbox and agent-loop limits
+# Sandbox and agent-loop limits (read at call time, so the benchmark can raise them)
 QUERY_TIMEOUT_S = 10
 MAX_ROWS = 1000
 MAX_RETRIES = 3
+
+# Prompt budget in tokens. Over this, the agent first picks relevant tables.
+# Groq models have far bigger windows, so the limit only really bites on Ollama.
+CONTEXT_LIMIT = OLLAMA_NUM_CTX if LLM_PROVIDER == "ollama" else 32_000
+
+# Phase 2 switches; off = Phase 1 behaviour. The BIRD benchmark measures each one.
+SUSPECT_ZERO_AGG = _env("SUSPECT_ZERO_AGG", "0") == "1"  # a single 0/NULL row counts as suspicious
+STRICT_RETRY = _env("STRICT_RETRY", "0") == "1"          # retry prompt forbids loosening filters

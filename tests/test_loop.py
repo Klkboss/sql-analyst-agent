@@ -1,16 +1,22 @@
 """Loop tests with a scripted fake LLM: each call returns the next canned reply."""
 import pytest
 
-from agent import llm, loop
-from agent.generator import extract_sql
+from agent import config, llm, loop
+from agent.generator import STRICT_NOTE, extract_sql, parse_tables
 from agent.llm import LLMResponse
 
 
 @pytest.fixture
 def fake_llm(monkeypatch):
+    """install(*replies) -> list that collects the messages of every LLM call."""
     def install(*replies):
-        it = iter(replies)
-        monkeypatch.setattr(llm, "chat", lambda messages: LLMResponse(next(it), 1.0, None))
+        it, calls = iter(replies), []
+
+        def chat(messages):
+            calls.append([dict(m) for m in messages])
+            return LLMResponse(next(it), 1.0, None)
+        monkeypatch.setattr(llm, "chat", chat)
+        return calls
     return install
 
 
@@ -19,19 +25,23 @@ def test_extract_sql_from_code_block():
     assert extract_sql("SELECT 2") == "SELECT 2"
 
 
+def test_parse_tables_keeps_only_real_names():
+    assert parse_tables("Album, `artist`, made_up", ["album", "artist", "track"]) == ["album", "artist"]
+
+
 def test_retries_after_error_then_succeeds(db, fake_llm):
     fake_llm("SELECT nme FROM artist", "SELECT name FROM artist")
     r = loop.run_agent("names?", db)
     assert r.ok and len(r.attempts) == 2
     assert "no such column" in r.attempts[0].error
-    assert len(r.result.rows) == 4
+    assert len(r.result.rows) == 4 and r.sql == "SELECT name FROM artist"
 
 
 def test_gives_up_after_max_retries(db, fake_llm):
     fake_llm(*["DROP TABLE artist"] * 10)
     r = loop.run_agent("drop it", db, max_retries=3)
     assert not r.ok and len(r.attempts) == 4  # 1 try + 3 retries
-    assert r.result is None
+    assert r.result is None and r.sql is None
 
 
 def test_empty_result_is_accepted_when_model_repeats_it(db, fake_llm):
@@ -40,3 +50,54 @@ def test_empty_result_is_accepted_when_model_repeats_it(db, fake_llm):
     r = loop.run_agent("who is Nobody?", db)
     assert r.ok and len(r.attempts) == 2
     assert "0 rows" in r.attempts[0].error and r.result.rows == []
+
+
+# --- Fix 1: zero aggregate ------------------------------------------------------
+
+COUNT_NOBODY = "SELECT COUNT(*) FROM artist WHERE name = 'Nobody'"
+
+
+def test_zero_count_passes_without_fix(db, fake_llm):
+    fake_llm(COUNT_NOBODY)
+    r = loop.run_agent("how many Nobody?", db, zero_agg_suspicious=False)
+    assert r.ok and len(r.attempts) == 1
+
+
+def test_zero_count_is_suspicious_with_fix(db, fake_llm):
+    fake_llm(COUNT_NOBODY, "SELECT COUNT(*) FROM artist WHERE name = 'AC/DC'")
+    r = loop.run_agent("how many Nobody?", db, zero_agg_suspicious=True)
+    assert "single row of 0/NULL" in r.attempts[0].error
+    assert r.ok and r.result.rows == [(1,)]
+
+
+# --- Fix 2: strict retry prompt --------------------------------------------------
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_strict_note_only_when_switched_on(db, fake_llm, strict):
+    calls = fake_llm("SELECT name FROM artist WHERE name = 'Nobody'", "SELECT name FROM artist")
+    loop.run_agent("q", db, strict_retry=strict)
+    assert (STRICT_NOTE in calls[1][-1]["content"]) is strict
+
+
+# --- Context budget / table selection -------------------------------------------
+
+def test_small_schema_skips_table_selection(db, fake_llm):
+    calls = fake_llm("SELECT 1")
+    r = loop.run_agent("q", db)
+    assert r.selected_tables is None and len(calls) == 1
+
+
+def test_big_schema_triggers_table_selection(db, fake_llm, monkeypatch):
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 350)  # selected fits (~280), full (~430) does not
+    calls = fake_llm("artist", "SELECT name FROM artist")
+    r = loop.run_agent("artist names?", db)
+    assert r.selected_tables == ["artist"] and not r.ctx_overflow
+    system = calls[1][0]["content"]  # the SQL call only saw the selected table
+    assert "Table artist:" in system and "Table album:" not in system
+    assert r.ok
+
+
+def test_still_too_big_is_flagged_not_hidden(db, fake_llm, monkeypatch):
+    monkeypatch.setattr(config, "CONTEXT_LIMIT", loop.RESERVED_TOKENS + 10)
+    fake_llm("artist", "SELECT name FROM artist")
+    assert loop.run_agent("q", db).ctx_overflow

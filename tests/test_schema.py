@@ -18,6 +18,21 @@ def test_at_most_three_sample_rows(db):
     assert "Audioslave" not in artist_block  # 4th row is left out
 
 
+def test_names_only_mode(db):
+    s = get_schema(db, "names")
+    assert "Table artist: id, name" in s
+    assert "INTEGER" not in s and "AC/DC" not in s
+
+
+def test_table_subset(db):
+    s = get_schema(db, "full", ("artist",))
+    assert "Table artist:" in s and "Table album:" not in s
+
+
+def test_odd_names_are_quoted(db):
+    assert 'Table "order items": "item id", "unit price"' in get_schema(db, "names")
+
+
 def test_long_values_are_shortened(db):
     s = get_schema(db)
     assert "A" * MAX_VALUE_CHARS + "..." in s

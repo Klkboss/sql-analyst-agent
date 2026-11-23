@@ -79,11 +79,12 @@ def open_readonly(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
-def run_query(db_path: str | Path, sql: str, timeout_s: float = config.QUERY_TIMEOUT_S,
-              max_rows: int = config.MAX_ROWS) -> QueryResult:
+def run_query(db_path: str | Path, sql: str, timeout_s: float | None = None,
+              max_rows: int | None = None) -> QueryResult:
     """Guard, then execute. Raises GuardError, TimeoutError or sqlite3.Error on failure."""
     check_sql(sql)
-    return _execute(db_path, sql, timeout_s, max_rows)
+    # Defaults read at call time (not import time) so the benchmark can change config.
+    return _execute(db_path, sql, timeout_s or config.QUERY_TIMEOUT_S, max_rows or config.MAX_ROWS)
 
 
 def _execute(db_path, sql, timeout_s, max_rows) -> QueryResult:
