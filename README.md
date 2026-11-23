@@ -7,6 +7,17 @@ explanation. Runs locally on Ollama; Groq is an optional cloud provider.
 
 Status: Phase 1 (core agent + CLI) and Phase 2 (BIRD benchmark) done.
 
+**BIRD dev, 200 questions, shipped defaults (qwen3:4b on a 6 GB laptop GPU):**
+
+| | Execution accuracy | Adjusted to BIRD's difficulty mix |
+|---|---|---|
+| **Without hints** (what real users get) | **40.0%** | **43.4%** |
+| With BIRD's evidence hints | 56.5% | 59.7% |
+
+Real users don't get BIRD's hand-written evidence hints, so the first row is the
+realistic number. The hints are worth ~16 points, which is why the app has a
+"Data notes" box where users can add their own, passed to the model the same way.
+
 ## Setup
 
 ```bash
@@ -100,9 +111,16 @@ annotated examples: [eval/results/failures.md](eval/results/failures.md).
 | `b_schema+ev` | full schema + evidence | 49.5 / 53.0 | 52.5 / 54.8 |
 | `c_retry+ev` | + self-correction + evidence | 51.5 / 55.5 | **56.0 / 58.5** |
 | `c_both+ev` | + both fixes + evidence | 51.5 / **56.0** | 55.5 / 58.3 |
+| **`final`** | **shipped defaults** (fix 1 on, fix 2 off, keyword quoting) | – | **40.0 / 43.4** |
+| **`final+ev`** | **shipped defaults + evidence** | – | **56.5 / 59.7** |
 
-Best run by difficulty (`c_retry+ev`), simple / moderate / challenging:
-qwen2.5-coder:7b 62.5 / 46.2 / 40.0; qwen3:4b 63.7 / 50.0 / 52.5.
+Shipped defaults: qwen3:4b, full schema, self-correction, `SUSPECT_ZERO_AGG=1`,
+`STRICT_RETRY=0` (tested, no gain), and SQL keywords quoted in the schema (BIRD's
+`financial.order` table caused syntax errors; the fix removed them). `final` vs `c_zero`
+differs by 1 point, entirely on databases whose prompt didn't change, i.e. run noise.
+
+Best run by difficulty, simple / moderate / challenging: qwen3:4b `final+ev`
+66.2 / 48.8 / 52.5; qwen2.5-coder:7b `c_retry+ev` 62.5 / 46.2 / 40.0.
 Speed: ~30 tok/s for the 7B (84% GPU, 16% CPU) vs ~52 tok/s for the 4B (100% GPU);
 5–7 s per question with self-correction.
 

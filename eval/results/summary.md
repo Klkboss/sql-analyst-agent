@@ -64,6 +64,8 @@ Generated 2026-11-23 by `python -m eval.report`. Sample: 200 questions (80 simpl
 | `b_schema+ev` | + full schema + evidence     | 200 |   52.5 |            54.8 |       58.8 |         50   |            45   |           53   |          0    |              4.3 |      51 |                23.5 |
 | `c_retry+ev`  | + self-correction + evidence | 200 |   56   |            58.5 |       63.7 |         50   |            52.5 |           56.5 |          0.21 |              4.8 |      52 |                23.5 |
 | `c_both+ev`   | + fix 1 + fix 2 + evidence   | 200 |   55.5 |            58.3 |       63.7 |         50   |            50   |           56   |          0.28 |              5.7 |      43 |                23.5 |
+| `final`       | shipped defaults             | 200 |   40   |            43.4 |       50   |         33.8 |            32.5 |           40.5 |          0.34 |              5.2 |      51 |                22   |
+| `final+ev`    | shipped defaults + evidence  | 200 |   56.5 |            59.7 |       66.2 |         48.8 |            52.5 |           57   |          0.26 |              5.2 |      52 |                23.5 |
 
 ### Effect of each change (paired, same questions)
 
@@ -76,18 +78,20 @@ Generated 2026-11-23 by `python -m eval.report`. Sample: 200 questions (80 simpl
 | `b_schema` → `b_schema+ev` |             200 |      40 |       7 |            16.5 |
 | `c_retry` → `c_retry+ev`   |             200 |      39 |       7 |            16   |
 | `c_retry+ev` → `c_both+ev` |             200 |       1 |       2 |            -0.5 |
+| `c_zero` → `final`         |             200 |       1 |       3 |            -1   |
+| `c_retry+ev` → `final+ev`  |             200 |       2 |       1 |             0.5 |
 
 ### Failure reasons
 
-| reason       |   a_names |   b_schema |   c_retry |   c_zero |   c_strict |   c_both |   a_names+ev |   b_schema+ev |   c_retry+ev |   c_both+ev |
-|:-------------|----------:|-----------:|----------:|---------:|-----------:|---------:|-------------:|--------------:|-------------:|------------:|
-| bad_column   |        24 |         10 |         0 |        0 |          0 |        0 |           19 |            12 |            1 |           1 |
-| bad_function |         1 |          0 |         0 |        0 |          0 |        0 |            1 |             1 |            0 |           0 |
-| bad_table    |         4 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |
-| empty_result |        50 |         25 |        20 |       20 |         24 |       24 |           32 |            15 |           14 |          16 |
-| format_only  |         0 |          1 |         1 |        1 |          1 |        1 |            0 |             1 |            1 |           1 |
-| guard        |         1 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |
-| pass         |        42 |         72 |        80 |       82 |         79 |       81 |           88 |           105 |          112 |         111 |
-| sql_error    |         1 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |
-| syntax       |         6 |          8 |         1 |        1 |          1 |        1 |            3 |             3 |            2 |           2 |
-| wrong_result |        71 |         84 |        98 |       96 |         95 |       93 |           57 |            63 |           70 |          69 |
+| reason       |   a_names |   b_schema |   c_retry |   c_zero |   c_strict |   c_both |   a_names+ev |   b_schema+ev |   c_retry+ev |   c_both+ev |   final |   final+ev |
+|:-------------|----------:|-----------:|----------:|---------:|-----------:|---------:|-------------:|--------------:|-------------:|------------:|--------:|-----------:|
+| bad_column   |        24 |         10 |         0 |        0 |          0 |        0 |           19 |            12 |            1 |           1 |       0 |          1 |
+| bad_function |         1 |          0 |         0 |        0 |          0 |        0 |            1 |             1 |            0 |           0 |       0 |          0 |
+| bad_table    |         4 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |       0 |          0 |
+| empty_result |        50 |         25 |        20 |       20 |         24 |       24 |           32 |            15 |           14 |          16 |      21 |         14 |
+| format_only  |         0 |          1 |         1 |        1 |          1 |        1 |            0 |             1 |            1 |           1 |       1 |          1 |
+| guard        |         1 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |       0 |          0 |
+| pass         |        42 |         72 |        80 |       82 |         79 |       81 |           88 |           105 |          112 |         111 |      80 |        113 |
+| sql_error    |         1 |          0 |         0 |        0 |          0 |        0 |            0 |             0 |            0 |           0 |       0 |          0 |
+| syntax       |         6 |          8 |         1 |        1 |          1 |        1 |            3 |             3 |            2 |           2 |       0 |          1 |
+| wrong_result |        71 |         84 |        98 |       96 |         95 |       93 |           57 |            63 |           70 |          69 |      98 |         70 |
