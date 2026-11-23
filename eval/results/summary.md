@@ -1,6 +1,6 @@
 # BIRD dev benchmark
 
-Generated 2026-11-23 by `python -m eval.report`. Sample: 200 questions (80 simple / 80 moderate / 40 challenging), seed 42, ids in `bird_sample.json`. Ollama `num_ctx=4096` (pinned), query timeout 30s, temperature 0.
+Generated 2026-11-24 by `python -m eval.report`. Sample: 200 questions (80 simple / 80 moderate / 40 challenging), seed 42, ids in `bird_sample.json`. Ollama `num_ctx=4096` (pinned), query timeout 30s, temperature 0.
 
 - **EX** = execution accuracy, BIRD's official rule (same set of result rows).
 - **Adjusted EX** re-weights the per-difficulty scores to BIRD dev's real mix (925 / 464 / 145), so it is comparable to published dev numbers.

@@ -6,6 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from eval.bird import (BENCH_NUM_CTX, BIRD, DEFAULT_RUNS, MODELS, PER_DIFFICULTY, PRED_TIMEOUT_S,
@@ -122,59 +123,86 @@ def write_summary(results) -> None:
 # Hand-written notes for examples the picker selects (by question id), written after
 # reading the attempts. Kept here so regenerating the report doesn't lose them.
 NOTES = {
-    164: "`order` is an SQL keyword, so the table name must be quoted. The syntax error was "
-         "enough for the model to fix it on the first retry.",
-    52: "A lucky pass: the model ignored the hint (it used `NumGE1500 >= 1` instead of summing the "
-        "three scores) and still got the right count. EX only checks the result, so small answers "
-        "like a count can reward wrong SQL.",
-    379: "The 0-row check working as designed: 'Duel Deck A' is not a set name, the feedback "
-         "pointed at the sample rows, and the model found `cards.duelDeck = 'a'`.",
-    190: "Fix 1 working as designed: COUNT = 0 came from filtering the wrong column (`A2` is the "
-         "district name, `A3` is the region). Phase 1's 0-rows check would have accepted the 0.",
-    920: "Fix 2 backfired. Both runs started with the wrong value 'Silverstone' (the user wrote "
-         "'Silverstone Circuit'). The plain retry fixed it; with the strict note the model treated "
-         "'return the same SQL' as permission and resubmitted it. The note should point at the "
-         "user's words, not the model's SQL.",
-    42: "A made-up column name, repeated unchanged on all 3 retries: the error alone didn't help. "
-        "qwen2.5-coder did this on 7 of its 42 retried questions in `c_retry`; qwen3 never did.",
-    28: "SQLite `=` is case-sensitive: the data says 'Locally funded', the model wrote "
-        "'Locally Funded', got 0 rows and then confirmed the empty result instead of checking case.",
+    158: "The keyword fix at work: `order` is now quoted. The error was a wrong alias (`d` is "
+         "`disp`, which has no district_id). The model resent the identical query once; the "
+         "'you sent this exact query before' note made it rewrite the join.",
+    293: "`molecule.label` holds '+' / '-', not words. COUNT = 0 looks like a valid answer, so "
+         "without SUSPECT_ZERO_AGG it would have been accepted; the warning sent the model to "
+         "the sample rows, where it found '+'.",
+    52: "Without the hint the model read 'total SAT score >= 1500' as the `NumGE1500` column (a "
+        "count of test takers). 'Total = Read + Math + Write' is a definition no schema shows; "
+        "the hint supplies it.",
+    54: "With the fan-out rule in the prompt, the model joined `satscores` to a question that "
+        "needs one table. This school has no SAT row, so the join returned 0 rows, and the "
+        "model confirmed the empty result. Without the rule it wrote the one-table query.",
+    668: "The shape check did what it was built for: show the value the ranking is based on. "
+         "BIRD's rule compares exact columns, so the extra `BadgeCount` column scores as wrong. "
+         "For a user, seeing 456 badges is better; on BIRD it cost 2 questions (q668, q1173).",
+    962: "The shape check didn't fire here, so both runs sent the same prompt at temperature 0, "
+         "yet one run used `driverStandings` and the other `results`. Differences like this are "
+         "why ±1 point between runs is noise.",
+    389: "BIRD's gold SQL returns card ids although the question asks for names. The agent's "
+         "answer is right and scores as wrong in every run of every config: a labeling error "
+         "in BIRD dev, not an agent failure.",
+    28: "Two wrong choices in a wide schema: 'locally funded' became `\"Charter Funding Type\" = "
+        "'Directly funded'` in frpm instead of `schools.FundingType = 'Locally funded'`, and "
+        "`DOCType` (a description) instead of `DOC` (the code).",
+    42: "The education type is `schools.EdOpsName`; the model looked in frpm instead. The NULL "
+        "and 0-row warnings made it rewrite the filter, but never the table choice, and it "
+        "finally confirmed the empty result.",
     228: "Right answer, but not rounded to the 4 decimals the question asked for. A miss under "
          "BIRD's rule; lenient EX accepts it.",
-    1170: "Dialect mix-up: `DATE_ADD(..., INTERVAL 1 YEAR)` is MySQL; SQLite uses "
-          "`date(x, '+1 year')`. Repeated unchanged 3 times.",
-    158: "Our bug: schema.py shows the table as bare `order`, but it is an SQL keyword. qwen3 "
-         "never thought to quote it. Fix: quote reserved words in `_show()`.",
+    1232: "`CAST(x)` without `AS type` is invalid SQLite. The error only says 'near \")\"', so "
+          "the model kept rewriting the WHERE clause and never touched the CAST.",
 }
 
+FINAL_MODEL = "qwen3:4b-instruct-2507-q4_K_M"
+SHAPE_MSG = "ranks rows by|subquery .SELECT"  # the two messages agent/sqlcheck.py sends
+
+
+def _first_error(attempts: str) -> str:
+    return json.loads(attempts)[0]["error"] or ""
+
+
 def _pick(results):
-    """Yield (title, model, run, question_id, base_run): stories first, then failure types."""
-    for model in MODELS:
-        r = lambda run: results.get((model, run))  # noqa: E731
-        stories = [
-            ("Self-correction rescued it", "c_retry", "b_schema",
-             lambda new, base: (new.ex == 1) & (base.ex == 0) & (pd.to_numeric(new.retries) > 0)),
-            ("Fix 1 (zero aggregate) rescued it", "c_zero", "c_retry",
-             lambda new, base: (new.ex == 1) & (base.ex == 0)),
-            ("Fix 2 (strict retry) changed the outcome", "c_strict", "c_retry",
-             lambda new, base: (new.ex != base.ex) & (pd.to_numeric(new.retries) > 0)),
-            ("Evidence hint was needed", "b_schema+ev", "b_schema",
-             lambda new, base: (new.ex == 1) & (base.ex == 0)),
-        ]
-        for title, new_run, base_run, cond in stories:
-            new, base = r(new_run), r(base_run)
-            if new is not None and base is not None:
-                common = new.index.intersection(base.index)
-                hits = common[cond(new.loc[common], base.loc[common]).to_numpy()]
-                if len(hits):
-                    yield title, model, new_run, hits[0], base_run
-    for model in MODELS:
-        df = results.get((model, "c_retry"))
-        if df is not None:
-            for reason in ["wrong_result", "bad_column", "empty_result", "format_only", "timeout", "syntax"]:
-                hits = df.index[df.reason == reason]
-                if len(hits):
-                    yield f"Failure: {reason}", model, "c_retry", hits[0], None
+    """Yield (title, model, run, question_id, base_run) from the final runs of the shipped
+    model: stories first, then one example per failure type."""
+    m = FINAL_MODEL
+    retried = lambda new: pd.to_numeric(new.retries, errors="coerce").fillna(0) > 0  # noqa: E731
+    stories = [
+        ("Self-correction rescued an SQL error", "final", None,
+         lambda new, base: (new.ex == 1) & retried(new)
+         & new.attempts.map(_first_error).str.startswith("The query failed")),
+        ("The zero-aggregate warning rescued it (SUSPECT_ZERO_AGG)", "final", None,
+         lambda new, base: (new.ex == 1) & new.attempts.str.contains("single row of 0/NULL")),
+        ("The evidence hint was needed", "final+ev", "final",
+         lambda new, base: (new.ex == 1) & (base.ex == 0)),
+        ("The fan-out prompt rule broke it (why CHECK_FANOUT is off)", "final_fanout", "final",
+         lambda new, base: (new.ex == 0) & (base.ex == 1)),
+        ("The SQL-shape check broke it (extra column)", "final", "final_noshape",
+         lambda new, base: (new.ex == 0) & (base.ex == 1) & new.attempts.str.contains(SHAPE_MSG)),
+        # Where the shape check didn't fire, these two runs sent identical prompts.
+        ("Run noise: same prompt, different answer", "final+ev", "final_noshape+ev",
+         lambda new, base: (new.ex != base.ex) & ~new.attempts.str.contains(SHAPE_MSG)),
+        ("Label noise: the gold answer is wrong", "final", None,
+         lambda new, base: new.index == 389),
+    ]
+    for title, new_run, base_run, cond in stories:
+        new, base = results.get((m, new_run)), results.get((m, base_run)) if base_run else None
+        if new is None or (base_run and base is None):
+            continue
+        common = new.index if base is None else new.index.intersection(base.index)
+        b = None if base is None else base.loc[common]
+        hits = common[np.asarray(cond(new.loc[common], b))]
+        if len(hits):
+            yield title, m, new_run, hits[0], base_run
+    df = results.get((m, "final"))
+    if df is not None:
+        for reason in ["wrong_result", "bad_column", "empty_result", "format_only", "timeout",
+                       "syntax", "context_overflow"]:
+            hits = df.index[df.reason == reason]
+            if len(hits):
+                yield f"Failure: {reason}", m, "final", hits[0], None
 
 
 def _example(i, title, model, run, qid, base_run, results) -> str:
@@ -199,7 +227,7 @@ def _example(i, title, model, run, qid, base_run, results) -> str:
     return "\n".join(out)
 
 
-def write_failures(results, limit: int = 10) -> None:
+def write_failures(results, limit: int = 12) -> None:
     seen, examples = set(), []
     for title, model, run, qid, base_run in _pick(results):
         if qid in seen or len(examples) >= limit:
@@ -207,7 +235,8 @@ def write_failures(results, limit: int = 10) -> None:
         seen.add(qid)
         examples.append(_example(len(examples) + 1, title, model, run, qid, base_run, results))
     header = ["# Interesting examples from the BIRD runs", "",
-              "Picked automatically by `eval/report.py`: cases where a change helped or hurt, "
+              "Picked automatically by `eval/report.py` from the final runs of the shipped model "
+              "(qwen3:4b): cases where a switch helped or hurt, noise in the benchmark, "
               "then one example per failure type.", ""]
     (RESULTS / "failures.md").write_text("\n".join(header + examples), encoding="utf-8")
 
