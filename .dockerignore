@@ -1,0 +1,16 @@
+# Keep secrets, data and dev files out of the build context (and so out of the image).
+.env
+.env.*
+.git
+.venv
+.claude
+CLAUDE.md
+archive
+archive.zip
+data/*
+!data/download_chinook.py
+eval
+tests
+**/__pycache__
+**/*.pyc
+.pytest_cache

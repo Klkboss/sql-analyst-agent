@@ -8,6 +8,7 @@ last few questions and their SQL. "Data notes" are hints added to every question
 passed exactly like BIRD's evidence hints (worth ~16 points in our benchmark).
 """
 import hashlib
+import os
 import tempfile
 import uuid
 from pathlib import Path
@@ -26,7 +27,8 @@ from agent.schema import get_schema
 ROOT = Path(__file__).parent
 SOURCES = {
     "Chinook (music store)": ROOT / "data" / "chinook.sqlite",
-    "Olist (Brazilian e-commerce)": ROOT / "data" / "olist.sqlite",
+    # Docker mounts Olist from the host instead of baking 173 MB into the image.
+    "Olist (Brazilian e-commerce)": Path(os.getenv("OLIST_DB") or ROOT / "data" / "olist.sqlite"),
 }
 SETUP_HINT = {"Chinook (music store)": "python data/download_chinook.py",
               "Olist (Brazilian e-commerce)": "python data/download_olist.py"}
@@ -90,7 +92,7 @@ def sidebar() -> tuple[Path | None, dict, str, str]:
     """Returns (db path, column-name mapping, conversation key, data notes)."""
     with st.sidebar:
         st.header("Data")
-        ready = [name for name, p in SOURCES.items() if p.exists()]
+        ready = [name for name, p in SOURCES.items() if p.is_file()]
         choice = st.radio("Database", ready + [UPLOAD])
         for name in SOURCES.keys() - set(ready):
             st.caption(f"{name.split(' (')[0]} not loaded yet: `{SETUP_HINT[name]}`")
@@ -136,8 +138,9 @@ def answer(question: str, db: Path, notes: str, turns: list[dict]) -> dict:
         r = run_agent(question, db, evidence=notes.strip() or None, history=history)
         text = explain(question, r.sql, r.result) if r.result is not None else None
     except requests.ConnectionError:
-        return {"question": question, "error": f"Can't reach Ollama at {config.OLLAMA_HOST}. "
-                                               "Is it running (`ollama serve`)?"}
+        where = (f"Ollama at {config.OLLAMA_HOST}. Is it running (`ollama serve`)?"
+                 if config.LLM_PROVIDER == "ollama" else "Groq. Check the internet connection.")
+        return {"question": question, "error": f"Can't reach {where}"}
     except requests.HTTPError as e:
         return {"question": question, "error": f"The LLM request failed: {e}"}
     return {"question": question, "agent": r, "sql": r.sql, "explanation": text}

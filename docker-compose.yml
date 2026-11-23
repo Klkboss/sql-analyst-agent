@@ -1,0 +1,24 @@
+# docker compose up --build    ->  http://localhost:8501
+#
+# LLM: Groq by default (GROQ_API_KEY from .env). To use Ollama on this machine instead,
+# set DOCKER_LLM_PROVIDER=ollama in .env or the shell.
+services:
+  app:
+    build: .
+    image: sql-analyst-agent
+    ports:
+      - "127.0.0.1:${APP_PORT:-8501}:8501"  # this machine only, like a local run
+    env_file:
+      - path: .env             # read when the container starts; never part of the image
+        required: false
+    environment:
+      LLM_PROVIDER: ${DOCKER_LLM_PROVIDER:-groq}
+      # host.docker.internal = the machine running Docker. On Linux, Ollama must listen
+      # on more than 127.0.0.1 for this to work (OLLAMA_HOST=0.0.0.0 ollama serve).
+      OLLAMA_HOST: ${DOCKER_OLLAMA_HOST:-http://host.docker.internal:11434}
+      OLIST_DB: /data/olist.sqlite
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Docker Desktop has it built in; Linux needs this
+    volumes:
+      - ./data:/data:ro  # Olist (data/olist.sqlite) stays on the host, read-only
+    restart: unless-stopped
