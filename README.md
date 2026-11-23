@@ -256,6 +256,6 @@ docker compose up --build            # http://localhost:8501
   project uses it only as a non-commercial demo. Kaggle needs a login, so download it by
   hand and run `python data/download_olist.py path/to/archive.zip` (a zip or an extracted
   folder). The raw files and the built `data/olist.sqlite` are not committed.
-- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io)
-, downloaded by `data/download_bird.py`, used only for the benchmark and
+- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io),
+  downloaded by `data/download_bird.py`, used only for the benchmark and
   not committed.
