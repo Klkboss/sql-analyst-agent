@@ -30,6 +30,18 @@ SOURCES = {
 }
 SETUP_HINT = {"Chinook (music store)": "python data/download_chinook.py",
               "Olist (Brazilian e-commerce)": "python data/download_olist.py"}
+# Built-in data notes, pre-filled in the sidebar (users can edit them). On Olist, without
+# the join path the model joined reviews to products with a scalar subquery and lost rows.
+DEFAULT_NOTES = {
+    "Olist (Brazilian e-commerce)": (
+        "Join paths: order_reviews -> order_items (order_id) -> products (product_id) or "
+        "sellers (seller_id); order_payments joins the same way; orders -> customers "
+        "(customer_id); products -> category_translation (product_category_name), English "
+        "names in product_category_name_english.\n"
+        "One order can have several items, payments and reviews: count orders with "
+        "COUNT(DISTINCT order_id). geolocation has many rows per zip prefix: aggregate it "
+        "before joining. Prices are in BRL."),
+}
 UPLOAD = "Upload CSV / Excel"
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "sql-analyst-agent"
 
@@ -81,13 +93,15 @@ def sidebar() -> tuple[Path | None, dict, str, str]:
         # and are copied into the widget whenever this source's box appears again.
         notes_key = f"notes::{key}"
         if notes_key not in state:
-            state[notes_key] = state.notes.get(key, "")
+            state[notes_key] = state.notes.get(key, DEFAULT_NOTES.get(key, ""))
         st.text_area("Data notes", key=notes_key, height=120,
                      placeholder="e.g. revenue = price + freight_value; 'late' means delivered "
                                  "after order_estimated_delivery_date",
                      help="Added to every question, like BIRD's evidence hints, which were "
                           "worth ~16 points of accuracy in our benchmark.")
         state.notes[key] = state[notes_key]
+        if key in DEFAULT_NOTES:
+            st.caption("Pre-filled with built-in notes for this database; edit freely.")
 
         if st.button("Clear conversation"):
             state.chats[key] = []

@@ -56,3 +56,14 @@ def test_data_notes_reach_the_prompt(fake_llm):
     at.chat_input[0].set_value("anything").run()
     assert not at.exception
     assert "Hint: Milliseconds is track length." in calls[0][-1]["content"]
+
+
+def test_olist_has_built_in_join_notes(fake_llm):
+    if not (APP.parent / "data" / "olist.sqlite").exists():
+        pytest.skip("needs data/olist.sqlite")
+    calls = fake_llm("```sql\nSELECT 1\n```", "One.")
+    at = AppTest.from_file(str(APP), default_timeout=30).run()
+    at.sidebar.radio[0].set_value("Olist (Brazilian e-commerce)").run()
+    assert "order_reviews -> order_items (order_id) -> products" in at.text_area[0].value
+    at.chat_input[0].set_value("anything").run()
+    assert "Hint: Join paths:" in calls[0][-1]["content"]
