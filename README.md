@@ -1,198 +1,249 @@
 # LLM Data Analyst Agent
 
-Ask a question in plain English about a database or your own CSV / Excel files;
-the agent writes a SQLite SELECT query with an LLM, runs it in a read-only sandbox,
-fixes its own mistakes (up to 3 retries), and answers with a chart, the result table,
-a short explanation and the SQL it ran. Follow-up questions build on earlier ones.
-Runs locally on Ollama; Groq is an optional cloud provider.
+Ask a question in plain English about a database or your own CSV / Excel files. The agent
+reads the schema, has an LLM write a SQLite `SELECT`, runs it in a read-only sandbox,
+fixes its own mistakes (up to 3 retries), and answers with a short explanation, a chart,
+the result table and the SQL it ran. Follow-up questions build on earlier ones.
+Runs locally on Ollama (qwen3:4b on a 6 GB laptop GPU); Groq is an optional cloud provider.
+Plain Python, no agent framework.
 
-Status: Phase 1 (core agent + CLI), Phase 2 (BIRD benchmark) and Phase 3 (Streamlit UI) done.
+<!-- Demo GIF: save the recording as docs/demo.gif and replace the next line with ![Demo](docs/demo.gif) -->
+_Demo GIF coming soon._
 
-**BIRD dev, 200 questions, shipped defaults (qwen3:4b on a 6 GB laptop GPU):**
+**BIRD dev benchmark, 200 questions, shipped defaults, qwen3:4b:**
 
 | | Execution accuracy | Adjusted to BIRD's difficulty mix |
 |---|---|---|
 | **Without hints** (what real users get) | **38.5%** | **41.0%** |
 | With BIRD's evidence hints | 57.0% | 58.0% |
 
-Real users don't get BIRD's hand-written evidence hints, so the first row is the
-realistic number. The benchmark pins Ollama's context at 4096 tokens so runs stay
-comparable; the app and CLI default to 8192 (`OLLAMA_NUM_CTX`), which the 4B model
-still fits fully on the GPU (3.3 GB). The hints are worth ~16 points, which is why the app has a
-"Data notes" box where users can add their own, passed to the model the same way.
+Real users don't get BIRD's hand-written evidence hints ("eligible free rate = free meals /
+enrollment"), so the first row is the realistic number. The hints are worth ~16 points,
+which is why the app has a **Data notes** box: your own hints, passed to the model the same way.
 
-## Setup
+## Contents
 
-```bash
-py -3.11 -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-copy .env.example .env          # then edit if needed
-python data/download_chinook.py
-python data/download_olist.py   # optional, see "Data" below
-ollama pull qwen3:4b-instruct-2507-q4_K_M
-```
-
-## Usage
-
-```bash
-streamlit run app.py            # web UI at http://localhost:8501
-python cli.py "Which 5 customers spent the most in total?"
-python eval_chinook.py          # 10-question accuracy check
-python data/download_bird.py    # BIRD dev set: 346 MB download, ~1.5 GB on disk
-python -m eval.bird             # BIRD benchmark (resumable; --limit 10 for a pilot)
-python -m eval.report           # -> eval/results/summary.md, failures.md
-pytest                          # unit tests, no LLM needed
-```
-
-## The app
-
-- **Data:** Chinook (music store), Olist (Brazilian e-commerce), or upload CSV / Excel
-  files. Each file or sheet becomes a table in a temporary SQLite file; names are
-  cleaned to snake_case for the SQL (`Order Date` -> `order_date`), and results and
-  charts show your original column names.
-- **Answer:** a 1–2 sentence explanation, a chart picked by rules (single number ->
-  metric card, dates -> line, label + number -> bar, two numbers -> scatter, one
-  number column -> histogram), the table, the SQL, and the log of every attempt.
-- **Data notes:** hints you write ("revenue = price + freight_value", "prices are in BRL")
-  are added to every question the same way BIRD's evidence hints are, which were worth
-  ~16 points of accuracy in the benchmark.
-- **Follow-ups:** the last 3 questions and their SQL go into the prompt, so "now only
-  2017" edits the previous query. If that overflows the context window, older turns
-  are dropped first, the newest is kept as long as possible.
-- Listens on `localhost` only, uploads capped at 50 MB (`.streamlit/config.toml`).
+- [How it works](#how-it-works)
+- [Results](#results)
+- [What helped, what didn't](#what-helped-what-didnt)
+- [Known limitations](#known-limitations)
+- [Setup](#setup)
+- [The app](#the-app)
+- [Data](#data)
 
 ## How it works
 
+```mermaid
+flowchart LR
+    Q["Question<br/>+ data notes<br/>+ last 3 turns"] --> S["schema.py<br/>tables, keys, sample rows,<br/>join paths"]
+    S --> F{"Fits the<br/>context window?"}
+    F -- no --> T["LLM picks tables;<br/>drop bridges, then sample rows"]
+    T --> G
+    F -- yes --> G["generator.py<br/>prompt"]
+    G --> L["llm.py<br/>Ollama or Groq"]
+    L --> X["sandbox.py<br/>SQL guard + read-only SQLite"]
+    X --> C{"Error or<br/>suspicious result?"}
+    C -- "yes: feed back, up to 3 retries" --> G
+    C -- no --> E["explain.py + charts.py"]
+    E --> UI["Streamlit: answer, chart,<br/>table, SQL, attempt log"]
 ```
-question ─► schema.py ─► (too big for context? pick tables first) ─► generator.py ─► llm.py ─► sandbox.py ─► result OK? ─► explain.py
-            (tables,      (prompt +       (Ollama    (guard +        │ no: error / 0 rows / all NULL
-             types, FKs,   extract SQL)    or Groq)   read-only DB)   └─► feed SQL + problem back (≤3 retries)
-             3 samples)
-```
+
+"Suspicious" means the query ran but returned 0 rows, only NULLs, a single 0/NULL row
+(e.g. `COUNT = 0` from a misspelled filter), or has a known bad shape (a subquery inside a
+JOIN's ON, or a ranking value it sorts by but doesn't show). The feedback tells the model
+to return the same query if it is sure, and then the result is accepted.
 
 | File | Role |
 |---|---|
 | `agent/config.py` | All settings, read from `.env` |
-| `agent/llm.py` | `chat(messages)` for Ollama and Groq over plain HTTP; logs latency and tokens/sec |
-| `agent/schema.py` | Schema as prompt text: columns, types, keys, 3 sample rows (long values cut to 50 chars) |
+| `agent/llm.py` | `chat(messages)` for Ollama and Groq over plain HTTP; latency, tokens/sec, rate-limit waits |
+| `agent/schema.py` | Schema as prompt text: columns, types, keys, 3 sample rows, join paths; SQL keywords quoted |
 | `agent/generator.py` | System prompt, retry messages, SQL extraction from ```sql blocks |
+| `agent/loop.py` | Generate → run → check → retry; fits the prompt to the context window; records every attempt |
+| `agent/sqlcheck.py` | SQL shape checks and repair of table aliases that are SQL keywords (`or`, `order`) |
+| `agent/fanout.py` | Join fan-out check (off by default, see below) |
 | `agent/sandbox.py` | SQL guard + locked-down execution |
-| `agent/loop.py` | Generate → run → check → retry; records every attempt; fits the prompt to the context window |
-| `agent/sqlcheck.py` | SQL shape checks (subquery in a JOIN's ON, ORDER BY metric not returned) and keyword-alias repair |
-| `agent/fanout.py` | Join fan-out check (off by default, see Phase 2 results) |
 | `agent/explain.py` | 1–2 sentence answer from the result |
-| `agent/ingest.py` | CSV / Excel -> SQLite, snake_case names + map back to the originals |
-| `agent/charts.py` | Rule-based chart choice -> Plotly figure |
-| `app.py` | Streamlit chat UI |
+| `agent/ingest.py` | CSV / Excel → SQLite, snake_case names mapped back to the originals |
+| `agent/charts.py` | Rule-based chart choice → Plotly figure |
+| `app.py`, `cli.py` | Streamlit chat UI, command line |
+| `eval/` | BIRD benchmark runner, scoring, report |
 
 ### Sandbox: four layers
 
 The LLM's SQL is untrusted input, so no single check is relied on:
-1. **Text guard** – one statement, must start with SELECT/WITH, no write keywords
+1. **Text guard**: one statement, must start with SELECT/WITH, no write keywords
    (string literals and comments are blanked first so they can't fool it).
-2. **`mode=ro` URI** – file opened read-only; a wrong path errors instead of creating an empty DB.
-3. **`PRAGMA query_only`** – SQLite refuses writes on the connection.
-4. **Authorizer callback** – SQLite asks before every operation; only reads are allowed.
+2. **`mode=ro` URI**: the file is opened read-only; a wrong path errors instead of creating an empty DB.
+3. **`PRAGMA query_only`**: SQLite refuses writes on the connection.
+4. **Authorizer callback**: SQLite asks before every operation; only reads are allowed.
    This is the real guarantee (tests run writes with the guard skipped to prove it).
 
-Limits: 10 s via a progress handler (`connect(timeout=)` only covers lock waits),
+Limits: 10 s per query via a progress handler (`connect(timeout=)` only covers lock waits),
 1000 rows via `fetchmany(1001)` so truncation is detected without rewriting the SQL.
 
-## Phase 1 results (Chinook, 10 questions)
+## Results
 
-Execution accuracy: a question passes when the result rows match a gold query
-(row/column order ignored, numbers to 2 decimals). RTX 4050 Laptop, 6 GB VRAM.
+**BIRD dev**: 200 questions (80 simple / 80 moderate / 40 challenging, seed 42), scored with
+BIRD's official execution-accuracy rule (same set of result rows). **Adjusted EX** re-weights
+the difficulty scores to BIRD dev's real mix (925 / 464 / 145), so it is comparable to
+published dev numbers. Temperature 0. Ollama's context is pinned at 4096 tokens in the
+benchmark so runs stay comparable; the app and CLI default to 8192 (`OLLAMA_NUM_CTX`),
+which the 4B model still fits fully on the GPU (3.3 GB). Full tables, failure reasons and
+fixed/broke counts: [eval/results/summary.md](eval/results/summary.md); annotated examples:
+[eval/results/failures.md](eval/results/failures.md).
 
-| Model | Passed | Retries used | Total time | Speed |
-|---|---|---|---|---|
-| qwen2.5-coder:7b | **10/10** | 0 | 35 s | ~29 tok/s |
-| qwen3:4b-instruct-2507-q4_K_M | **10/10** | 0 | 36 s | ~53 tok/s (100% GPU) |
+### qwen3:4b vs qwen2.5-coder:7b (EX / adjusted EX, %)
 
-| # | Level | Question |
-|---|---|---|
-| 1–4 | easy | counts, filters, DISTINCT, SUM on one table |
-| 5–6 | 1 join | albums by AC/DC, tracks in Rock |
-| 7 | join + agg | top 5 customers by spend |
-| 8–9 | 2 joins | top 3 genres by revenue, top support rep by sales |
-| 10 | 3 joins | best-selling artist by quantity |
-
-Chinook is easy for these models; the real test is BIRD below.
-
-## Phase 2 results (BIRD dev, 200 questions)
-
-200 questions from BIRD dev (80 simple / 80 moderate / 40 challenging, seed 42),
-scored with BIRD's official execution-accuracy rule. **Adjusted EX** re-weights the
-difficulty scores to BIRD dev's real mix (925 / 464 / 145) so it is comparable to
-published dev numbers. Ollama `num_ctx=4096`, temperature 0. Full tables, failure
-reasons and paired fixed/broke counts: [eval/results/summary.md](eval/results/summary.md);
-annotated examples: [eval/results/failures.md](eval/results/failures.md).
-
-| Run | Adds | qwen2.5-coder:7b EX / adjusted | qwen3:4b EX / adjusted |
+| Run | Adds | qwen2.5-coder:7b | qwen3:4b |
 |---|---|---|---|
 | `a_names` | table + column names only | 25.5 / 28.8 | 21.0 / 25.1 |
 | `b_schema` | + types, keys, sample rows | 34.5 / 38.3 | 36.0 / 38.3 |
 | `c_retry` | + self-correction | 35.5 / 39.3 | 40.0 / 42.5 |
-| `c_both` | + fix 1 + fix 2 | 35.5 / 39.3 | 40.5 / 43.3 |
-| `a_names+ev` | names + evidence hint | 47.5 / 50.7 | 44.0 / 46.5 |
-| `b_schema+ev` | full schema + evidence | 49.5 / 53.0 | 52.5 / 54.8 |
-| `c_retry+ev` | + self-correction + evidence | 51.5 / 55.5 | **56.0 / 58.5** |
-| `c_both+ev` | + both fixes + evidence | 51.5 / **56.0** | 55.5 / 58.3 |
-| **`final`** | **shipped defaults** (see below) | – | **38.5 / 41.0** |
+| `b_schema+ev` | full schema + evidence hints | 49.5 / 53.0 | 52.5 / 54.8 |
+| `c_retry+ev` | + self-correction + evidence | 51.5 / 55.5 | 56.0 / 58.5 |
+| **`final`** | **shipped defaults** | – | **38.5 / 41.0** |
 | **`final+ev`** | **shipped defaults + evidence** | – | **57.0 / 58.0** |
 
-Shipped defaults: qwen3:4b, full schema with join paths, self-correction,
-`SUSPECT_ZERO_AGG=1`, `CHECK_SQL_SHAPE=1`, `STRICT_RETRY=0`, `CHECK_FANOUT=0`, SQL
-keywords quoted in the schema, keyword table aliases renamed, and context fallbacks
-(drop bridge tables, then sample rows, before giving up with a clear message).
+The smaller model wins: qwen3:4b beats qwen2.5-coder:7b in every run that gets the full
+schema, and runs ~1.7× faster (~53 vs ~30 tokens/s) because it fits entirely in 6 GB of
+VRAM (the 7B runs 84% GPU / 16% CPU). 5–7 s per question with self-correction.
 
-Each switch, measured question by question on the same 200 questions (qwen3:4b):
+### Groq model: openai/gpt-oss-120b (50-question check)
 
-| Switch | Default | Fixed / broke, no hints | Fixed / broke, with hints | Verdict |
-|---|---|---|---|---|
-| `SUSPECT_ZERO_AGG` (single 0/NULL row is suspicious) | on | 2 / 0 | – | small real gain |
-| `STRICT_RETRY` (stricter retry prompt) | off | 0 / 1 | – | tested, no gain |
-| `CHECK_SQL_SHAPE` (subquery in JOIN ON, hidden ranking metric) | on | 0 / 2 | 1 / 2 | never fired on BIRD; the diffs are run noise. Kept for the Olist bug it fixes |
-| `CHECK_FANOUT` (join fan-out rule + self-check) | **off** | 6 / 9 | 6 / 10 | breaks more than it fixes |
+The shipped config on Groq's free tier, on the first 50 questions of the same sample
+(20 / 20 / 10), next to qwen3:4b on the same 50. Same prompts: the 4096-token budget is
+kept, so table selection runs on the same questions. `GROQ_REASONING_EFFORT=low`.
 
-`SUSPECT_ZERO_AGG` and `STRICT_RETRY` were measured in Phase 2 (`c_retry` → `c_zero` /
-`c_strict`); the other two in the final runs (`final_noshape` → `final`, `final` →
-`final_fanout`). The fan-out self-check itself fired on only 6 questions and changed
-none of the outcomes; the swings came from the prompt rule ("count entities with
-COUNT(DISTINCT key)") changing the first query. BIRD's gold SQL usually counts plain
-rows, so the rule pushes the wrong way there. On Olist the same mistake was real
-(orders counted once per item), so it stays available as a switch.
+| Model | EX, no hints | EX, with hints | Adjusted, no hints / with | s per question | Tokens per question |
+|---|---|---|---|---|---|
+| qwen3:4b (local) | 38.0 | 52.0 | 39.4 / 46.8 | 5–6 | – |
+| openai/gpt-oss-120b (Groq) | 32.0 | 56.0 | 31.9 / 50.4 | 10–14 | ~1,900 / ~1,300 |
 
-The Phase 3 schema changes (join paths, keyword quoting) are about neutral on BIRD:
-`c_zero` → `final` is 8 fixed / 13 broke without hints (−2.5) and 15 / 13 with hints
-(+1). The join-path section makes prompts longer, so at the pinned 4096 tokens table
-selection ran on 39.5% of questions instead of 22%. They were built for Olist, where
-they took the reviews-by-category question from 0/4 to 4/4.
+On 50 questions one question is 2 points, and both gaps are within noise: the 120B model
+is not clearly better in this pipeline. In 4 of the 7 questions only the 4B got right,
+gpt-oss had the right answer plus extra context columns (the school name next to the
+count), which BIRD's exact-column rule scores as wrong. Its time per question is mostly
+waiting on the free tier's 8,000 tokens/minute limit. Reasoning effort `low` vs Groq's
+default gave the same accuracy and token use in a 5-question pilot, and was much faster.
 
-Best run by difficulty, simple / moderate / challenging: qwen3:4b `final+ev`
-61.3 / 50.0 / 62.5; qwen2.5-coder:7b `c_retry+ev` 62.5 / 46.2 / 40.0.
-Speed: ~30 tok/s for the 7B (84% GPU, 16% CPU) vs ~52 tok/s for the 4B (100% GPU);
-5–7 s per question with self-correction.
+### Phase 1: Chinook, 10 questions
 
-What the numbers say:
-- **Evidence hints are the biggest lever (+15–17 points).** Many BIRD questions hinge on
-  definitions ("eligible free rate = free meals / enrollment") no schema can reveal.
-- **Schema context is next (+9 / +15 points without hints).** Types and sample rows
-  show the model real values and formats.
-- **Self-correction helps a little, and never hurt:** +1 (7B) / +4 (4B) points, 0 previously
-  correct answers broken. The 4B uses retries better: it cleared every `no such column`
-  error, while the 7B resubmitted the same failing SQL in 7 of its 42 retried questions.
-- **The smaller model wins.** qwen3:4b beats qwen2.5-coder:7b in every run that gets the full schema,
-  and runs ~1.7× faster because it fits entirely in 6 GB of VRAM.
-- **The two Phase 1 fixes are within noise on BIRD.** Fix 1 (single 0/NULL row is
-  suspicious) fixed 2 and broke 0 on the 4B, 0/0 on the 7B. Fix 2 (strict retry prompt)
-  broke 1 and fixed 0 on the 4B (0/0 on the 7B): the model read "return the same SQL" as permission to keep a wrong
-  value. Even at temperature 0, identical prompts gave different SQL on up to 4 of 200
-  questions between runs, so ±1 point differences are not meaningful.
-- **Table selection** ran on 22–24% of questions before the join paths (39.5% after) (card_games, european_football_2 and a
-  few california_schools). It works (74% EX on those questions when the result fits, 7B `c_retry+ev`), but
-  5 questions per run picked very wide tables and still overflowed 4096 tokens.
-- **Lenient EX is within 0.5 points of EX**, so the misses are real, not formatting.
+10/10 for both models, 0 retries (counts, filters, 1–3 joins, top-N by revenue). Chinook
+is easy for these models; BIRD is the real test. Run it with `python eval_chinook.py`.
+
+## What helped, what didn't
+
+Measured question by question on the same 200 questions (qwen3:4b, fixed / broke):
+
+| Change | Fixed / broke | Net EX | Verdict |
+|---|---|---|---|
+| Evidence hints | 39 / 7 | **+16** | Biggest lever: many questions hinge on definitions no schema shows. Hence Data notes. |
+| Schema context (types, keys, sample rows) | – | **+15** (7B: +9) | Shows real values and formats to match filters against. |
+| Self-correction (≤3 retries) | 8 / 0 | **+4** (7B: +1) | Never broke a correct answer. The 4B cleared every `no such column` error; the 7B resent the same failing SQL in 7 of 42 retried questions. |
+| `SUSPECT_ZERO_AGG=1` (single 0/NULL row is suspicious) | 2 / 0 | +1 | On. `COUNT = 0` from a misspelled filter used to pass silently. |
+| `STRICT_RETRY` (stricter retry prompt) | 0 / 1 | −0.5 | **Off, tested, no gain.** The model read "return the same SQL if sure" as permission to keep a wrong value. |
+| `CHECK_FANOUT` (join fan-out rule + self-check) | 6 / 9, with hints 6 / 10 | −1.5 / −2 | **Off: breaks more than it fixes.** The self-check fired on 6 questions and was behind at most 1 change; the prompt rule ("count entities with COUNT(DISTINCT key)") changed first queries, and BIRD's gold SQL usually counts plain rows. |
+| `CHECK_SQL_SHAPE` (subquery in JOIN ON, hidden ranking value) | 0 / 2, with hints 1 / 2 (the 1 was run noise) | −1 / −0.5 | **On by design, a small loss on BIRD.** It fired on 4 questions; both losses were the model adding the value it ranked by as a column (q668: the user *and* their 456 badges), which BIRD's exact-column rule counts as wrong. For a person reading the answer that column is the point, and the subquery half fixed a real Olist bug. |
+| Join paths + keyword quoting (Phase 3 schema) | 8 / 13, with hints 15 / 13 | −2.5 / +1 | About neutral on BIRD. They make prompts longer, so at 4096 tokens table selection ran on 39.5% of questions instead of 22%. Built for Olist, together with its built-in notes, which took a reviews-by-category question from 0/4 to 4/4. |
+| Groq gpt-oss-120b instead of the local 4B | see above | −6 / +4 | Within noise on 50 questions. |
+
+Run `python -m eval.bird --models qwen3:4b-instruct-2507-q4_K_M --runs final final+ev`
+to reproduce the headline (about 15 min per run on an RTX 4050 laptop).
+
+## Known limitations
+
+- **Benchmark noise.** Temperature 0 is not fully deterministic on Ollama: identical
+  prompts gave different SQL on up to 4 of 200 questions between runs (q962 passed in one
+  run, failed in the other with the same prompt), so ±1 point differences mean nothing.
+  BIRD's gold answers have errors too: q389 asks for card *names*, the gold SQL returns
+  card *ids*, and the agent's correct answer fails in every config. The 50-question Groq
+  check has a standard error of about ±7 points.
+- **About 4 in 10 hard questions without hints.** On realistic multi-table questions the
+  4B picks a wrong column or table often enough that every answer needs checking; the SQL
+  and attempt log are always shown for that reason. Data notes help most.
+- **A model can confirm its own mistake.** A warning says "return the same query if you
+  are sure", and the model sometimes is, wrongly. On Olist, the built-in join-path note
+  makes the 4B join `order_items` even for one-table questions ("average review score",
+  "payment total per type"), which repeats each review / payment once per item. The
+  fan-out check flags the join, and the model resends it. None of the example questions
+  hit this.
+- **Context.** At 4096 tokens, very wide schemas fall back to table selection and then to
+  dropping sample rows; if even that doesn't fit, the agent says so instead of answering.
+- **Groq free tier.** 8,000 tokens/minute is ~4 questions/minute; the agent waits out
+  short limits, and shows an error when a daily limit is hit.
+- **Scope.** SQLite only, read-only, uploads up to 50 MB, no login: meant for local use.
+
+## Setup
+
+### Local, with Ollama
+
+```bash
+py -3.11 -m venv .venv
+.venv\Scripts\activate              # Windows (source .venv/bin/activate elsewhere)
+pip install -r requirements.txt
+copy .env.example .env               # then edit if needed
+python data/download_chinook.py
+python data/download_olist.py        # optional, see "Data"
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+
+streamlit run app.py                 # http://localhost:8501
+python cli.py "Which 5 customers spent the most in total?"
+pytest                               # unit tests, no LLM needed
+```
+
+Benchmark: `python data/download_bird.py` (346 MB download, ~1.5 GB on disk), then
+`python -m eval.bird` (resumable; `--limit 10` for a pilot; `--provider groq --models
+openai/gpt-oss-120b --first 50` for the Groq check) and `python -m eval.report`.
+
+### Docker, with Groq
+
+```bash
+copy .env.example .env               # set GROQ_API_KEY (free at console.groq.com)
+docker compose up --build            # http://localhost:8501
+```
+
+- The key is read from `.env` when the container starts; `.env` is never copied into the image.
+- Chinook is built into the image. Olist is mounted read-only from `./data` (build
+  `data/olist.sqlite` with the local steps above), so the 173 MB database stays out of the image.
+- **Ollama instead of Groq:** set `DOCKER_LLM_PROVIDER=ollama` in `.env`. The container
+  reaches Ollama on your machine at `host.docker.internal:11434`; on Linux, start Ollama
+  with `OLLAMA_HOST=0.0.0.0` so it accepts connections from the container.
+- The app is published on `127.0.0.1` only (`APP_PORT` changes the port). Inside the
+  container Streamlit listens on `0.0.0.0` so Docker can reach it; local runs without
+  Docker stay on `localhost` (`.streamlit/config.toml`).
+- The image is multi-arch (`python:3.11-slim`); `docker buildx build --platform linux/arm64 .` builds it for ARM.
+- On Windows, run Compose from PowerShell or cmd: Git Bash's lowercase `c:/` path makes
+  Compose's builder ask for extra file permissions.
+
+### Settings (`.env`)
+
+| Setting | Default | |
+|---|---|---|
+| `LLM_PROVIDER` | `ollama` | or `groq` |
+| `OLLAMA_MODEL` | `qwen3:4b-instruct-2507-q4_K_M` | `qwen2.5-coder:7b` also tested |
+| `OLLAMA_NUM_CTX` | `8192` | context window; the benchmark pins 4096 |
+| `GROQ_MODEL` / `GROQ_REASONING_EFFORT` | `openai/gpt-oss-120b` / `low` | |
+| `SUSPECT_ZERO_AGG`, `CHECK_SQL_SHAPE` | `1` | see "What helped" |
+| `STRICT_RETRY`, `CHECK_FANOUT` | `0` | tested, off |
+
+## The app
+
+- **Data:** Chinook (music store), Olist (Brazilian e-commerce), or upload CSV / Excel
+  files. Each file or sheet becomes a table in a temporary SQLite file; names are cleaned
+  to snake_case for the SQL (`Order Date` → `order_date`), and results and charts show your
+  original column names.
+- **Example questions:** 5 per demo database, each passed 3 runs out of 3 at the app defaults.
+- **Answer:** a 1–2 sentence explanation, a chart picked by rules (single number → metric
+  card, dates → line, label + number → bar, two numbers → scatter, one number column →
+  histogram), the table, the SQL, and the log of every attempt.
+- **Data notes:** your hints ("revenue = price + freight_value") are added to every
+  question like BIRD's evidence hints. Olist comes with built-in notes (join paths,
+  "count orders with COUNT(DISTINCT order_id)", prices in BRL).
+- **Follow-ups:** the last 3 questions and their SQL go into the prompt, so "now only
+  2017" edits the previous query. If that overflows the context window, older turns are
+  dropped first.
+- Listens on `localhost` only, uploads capped at 50 MB (`.streamlit/config.toml`).
 
 ## Data
 
@@ -201,9 +252,10 @@ What the numbers say:
 - **Olist**: [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce),
   ~100k orders from 2016–2018, licensed
   [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/): non-commercial
-  use only, with attribution, and derived data shared under the same license. Kaggle
-  needs a login, so download it by hand and run
-  `python data/download_olist.py path/to/archive.zip` (a zip or an extracted folder).
-  The raw files and the built `data/olist.sqlite` are not committed.
-- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io), downloaded by
-  `data/download_bird.py`, used only for the benchmark.
+  use only, with attribution, and derived data shared under the same license. This
+  project uses it only as a non-commercial demo. Kaggle needs a login, so download it by
+  hand and run `python data/download_olist.py path/to/archive.zip` (a zip or an extracted
+  folder). The raw files and the built `data/olist.sqlite` are not committed.
+- **BIRD** dev set: [bird-bench.github.io](https://bird-bench.github.io)
+, downloaded by `data/download_bird.py`, used only for the benchmark and
+  not committed.
