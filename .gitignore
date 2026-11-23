@@ -17,3 +17,4 @@ data/*.sqlite
 data/*.db
 data/*.part
 data/bird/
+eval/results/run.log
